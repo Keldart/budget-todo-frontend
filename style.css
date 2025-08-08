@@ -1,0 +1,67 @@
+// Configuration Supabase
+const SUPABASE_URL = "https://ejvbaftvwcbdfmurtzaz.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVqdmJhZnR2d2NiZGZtdXJ0emF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ1NzI4ODIsImV4cCI6MjA3MDE0ODg4Mn0.8VuFZsMWk-YhZ-EfjuzxxZagXguTwMH6V-izba9WpvU";
+
+const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Éléments DOM
+const authSection = document.getElementById("auth-section");
+const appSection = document.getElementById("app-section");
+
+// Inscription
+document.getElementById("register-btn").addEventListener("click", async () => {
+    const email = document.getElementById("register-email").value;
+    const password = document.getElementById("register-password").value;
+    const { error } = await supabase.auth.signUp({ email, password });
+
+    if (error) {
+        alert("Erreur: " + error.message);
+    } else {
+        alert("Vérifie ton email pour confirmer ton inscription !");
+    }
+});
+
+// Connexion
+document.getElementById("login-btn").addEventListener("click", async () => {
+    const email = document.getElementById("login-email").value;
+    const password = document.getElementById("login-password").value;
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (error) {
+        alert("Erreur: " + error.message);
+    } else {
+        authSection.style.display = "none";
+        appSection.style.display = "block";
+    }
+});
+
+// Déconnexion
+document.getElementById("logout-btn").addEventListener("click", async () => {
+    await supabase.auth.signOut();
+    authSection.style.display = "block";
+    appSection.style.display = "none";
+});
+
+// To-Do List
+document.getElementById("add-todo-btn").addEventListener("click", () => {
+    const task = document.getElementById("todo-input").value;
+    if (task) {
+        const li = document.createElement("li");
+        li.textContent = task;
+        document.getElementById("todo-list").appendChild(li);
+        document.getElementById("todo-input").value = "";
+    }
+});
+
+// Dépenses
+document.getElementById("add-expense-btn").addEventListener("click", () => {
+    const name = document.getElementById("expense-name").value;
+    const amount = document.getElementById("expense-amount").value;
+    if (name && amount) {
+        const li = document.createElement("li");
+        li.textContent = `${name} - ${amount}€`;
+        document.getElementById("expense-list").appendChild(li);
+        document.getElementById("expense-name").value = "";
+        document.getElementById("expense-amount").value = "";
+    }
+});
