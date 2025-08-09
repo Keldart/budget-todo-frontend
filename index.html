@@ -37,6 +37,213 @@
             }
         }
         
+        // Fonction de diagnostic complète
+        async function diagnostiquerConnexion() {
+            const messageDiv = document.getElementById('message-connexion');
+            messageDiv.innerHTML = `
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 class="font-bold text-blue-800 mb-3">🔧 Diagnostic en cours...</h4>
+                    <div id="diagnostic-steps" class="space-y-2 text-sm"></div>
+                </div>
+            `;
+            
+            const stepsDiv = document.getElementById('diagnostic-steps');
+            
+            // Étape 1: Test de connexion internet
+            stepsDiv.innerHTML += '<div class="text-blue-600">⏳ Test de connexion internet...</div>';
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            try {
+                await fetch('https://www.google.com/favicon.ico', { mode: 'no-cors' });
+                stepsDiv.innerHTML += '<div class="text-green-600">✅ Connexion internet OK</div>';
+            } catch {
+                stepsDiv.innerHTML += '<div class="text-red-600">❌ Pas de connexion internet</div>';
+                return;
+            }
+            
+            // Étape 2: Test du serveur principal
+            stepsDiv.innerHTML += '<div class="text-blue-600">⏳ Test du serveur Maîtriz...</div>';
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/health`, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+                
+                if (response.ok) {
+                    stepsDiv.innerHTML += '<div class="text-green-600">✅ Serveur Maîtriz accessible</div>';
+                } else {
+                    stepsDiv.innerHTML += `<div class="text-orange-600">⚠️ Serveur répond avec erreur: ${response.status}</div>`;
+                }
+            } catch (error) {
+                stepsDiv.innerHTML += `<div class="text-red-600">❌ Serveur Maîtriz inaccessible: ${error.message}</div>`;
+            }
+            
+            // Étape 3: Test de l'endpoint de connexion
+            stepsDiv.innerHTML += '<div class="text-blue-600">⏳ Test de l\'endpoint de connexion...</div>';
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: 'test@test.com', password: 'test' }),
+                    mode: 'cors'
+                });
+                
+                if (response.status === 401) {
+                    stepsDiv.innerHTML += '<div class="text-green-600">✅ Endpoint de connexion fonctionne (erreur 401 attendue)</div>';
+                } else {
+                    stepsDiv.innerHTML += `<div class="text-orange-600">⚠️ Endpoint répond: ${response.status}</div>`;
+                }
+            } catch (error) {
+                stepsDiv.innerHTML += `<div class="text-red-600">❌ Endpoint de connexion inaccessible: ${error.message}</div>`;
+            }
+            
+            // Étape 4: Vérification des données stockées
+            stepsDiv.innerHTML += '<div class="text-blue-600">⏳ Vérification des données locales...</div>';
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            const storedToken = localStorage.getItem('authToken');
+            const storedEmail = localStorage.getItem('userEmail');
+            
+            if (storedToken && storedEmail) {
+                stepsDiv.innerHTML += `<div class="text-green-600">✅ Données de session trouvées pour: ${storedEmail}</div>`;
+                
+                // Test du token stocké
+                try {
+                    const response = await fetch(`${API_BASE_URL}/me`, {
+                        headers: { 'Authorization': `Bearer ${storedToken}` },
+                        mode: 'cors'
+                    });
+                    
+                    if (response.ok) {
+                        stepsDiv.innerHTML += '<div class="text-green-600">✅ Token valide - reconnexion possible</div>';
+                        stepsDiv.innerHTML += `
+                            <button onclick="reconnecterAvecToken()" 
+                                    class="mt-3 w-full bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg">
+                                🔄 Reconnecter automatiquement
+                            </button>
+                        `;
+                    } else {
+                        stepsDiv.innerHTML += '<div class="text-red-600">❌ Token expiré - nouvelle connexion requise</div>';
+                        localStorage.removeItem('authToken');
+                        localStorage.removeItem('userEmail');
+                        localStorage.removeItem('userId');
+                    }
+                } catch (error) {
+                    stepsDiv.innerHTML += `<div class="text-red-600">❌ Impossible de vérifier le token: ${error.message}</div>`;
+                }
+            } else {
+                stepsDiv.innerHTML += '<div class="text-orange-600">⚠️ Aucune session sauvegardée</div>';
+            }
+            
+            // Résumé et recommandations
+            stepsDiv.innerHTML += `
+                <div class="mt-4 p-3 bg-slate-100 rounded-lg">
+                    <h5 class="font-bold text-slate-800 mb-2">💡 Recommandations:</h5>
+                    <ul class="text-sm text-slate-700 space-y-1">
+                        <li>• Vérifiez que votre email et mot de passe sont corrects</li>
+                        <li>• Essayez de rafraîchir la page (F5)</li>
+                        <li>• Vérifiez votre connexion internet</li>
+                        <li>• Si le problème persiste, contactez le support</li>
+                    </ul>
+                </div>
+                <button onclick="fermerDiagnostic()" 
+                        class="mt-3 w-full bg-slate-500 hover:bg-slate-600 text-white px-4 py-2 rounded-lg">
+                    Fermer le diagnostic
+                </button>
+            `;
+        }
+        
+        // Fonction pour reconnecter avec le token stocké
+        async function reconnecterAvecToken() {
+            const storedToken = localStorage.getItem('authToken');
+            const storedEmail = localStorage.getItem('userEmail');
+            
+            if (storedToken && storedEmail) {
+                authToken = storedToken;
+                
+                try {
+                    const userInfo = await apiCall('/me');
+                    currentUser = userInfo;
+                    utilisateurConnecte = true;
+                    
+                    mettreAJourInterfaceConnexion(userInfo.email);
+                    await chargerDonneesUtilisateur();
+                    
+                    afficherMessage('✅ Reconnexion automatique réussie !', 'success');
+                    setTimeout(() => changerOnglet('budget'), 1000);
+                    
+                } catch (error) {
+                    afficherMessage('❌ Échec de la reconnexion automatique', 'error');
+                }
+            }
+        }
+        
+        // Fonction pour fermer le diagnostic
+        function fermerDiagnostic() {
+            document.getElementById('message-connexion').classList.add('hidden');
+        }
+        
+        // Fonction pour activer le mode hors ligne
+        function activerModeHorsLigne() {
+            // Marquer comme utilisateur hors ligne
+            utilisateurConnecte = false;
+            authToken = null;
+            currentUser = { email: 'Mode Hors Ligne', id: 'offline' };
+            
+            // Sauvegarder le mode hors ligne
+            localStorage.setItem('modeHorsLigne', 'true');
+            localStorage.setItem('userEmail', 'Mode Hors Ligne');
+            
+            // Mettre à jour l'interface
+            const btnConnexion = document.getElementById('btn-connexion');
+            btnConnexion.innerHTML = `<span class="text-sm">📱</span>`;
+            btnConnexion.title = 'Mode hors ligne - Données locales uniquement';
+            btnConnexion.classList.add('bg-orange-500', 'hover:bg-orange-600');
+            btnConnexion.classList.remove('bg-gradient-to-r', 'from-purple-600', 'to-pink-600', 'hover:from-purple-700', 'hover:to-pink-700');
+            btnConnexion.onclick = () => changerOnglet('connexion');
+            
+            // Afficher un message d'information
+            afficherMessage('📱 Mode hors ligne activé ! Vos données sont sauvegardées localement.', 'info');
+            
+            // Charger les données locales existantes
+            chargerDonneesLocales();
+            
+            // Rediriger vers l'onglet budget
+            setTimeout(() => {
+                changerOnglet('budget');
+            }, 1500);
+        }
+        
+        // Fonction pour charger les données locales
+        function chargerDonneesLocales() {
+            try {
+                const donneesLocales = localStorage.getItem('donneesParMois');
+                if (donneesLocales) {
+                    donneesParMois = JSON.parse(donneesLocales);
+                    console.log('📱 Données locales chargées:', Object.keys(donneesParMois).length, 'mois');
+                } else {
+                    console.log('📱 Aucune donnée locale trouvée, démarrage avec données vides');
+                }
+                mettreAJourAffichage();
+            } catch (error) {
+                console.error('❌ Erreur lors du chargement des données locales:', error);
+            }
+        }
+        
+        // Fonction pour sauvegarder les données localement
+        function sauvegarderDonneesLocales() {
+            try {
+                localStorage.setItem('donneesParMois', JSON.stringify(donneesParMois));
+                console.log('💾 Données sauvegardées localement');
+            } catch (error) {
+                console.error('❌ Erreur lors de la sauvegarde locale:', error);
+            }
+        }
+        
         // Fonction pour faire des appels API authentifiés
         async function apiCall(endpoint, options = {}) {
             const url = `${API_BASE_URL}${endpoint}`;
@@ -432,6 +639,20 @@
                                     class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-3 rounded-xl font-medium transition-all">
                                 <span id="texte-bascule">Pas encore de compte ? S'inscrire</span>
                             </button>
+                            
+                            <!-- Mode hors ligne temporaire -->
+                            <div class="border-t border-slate-200 pt-4">
+                                <p class="text-sm text-slate-600 text-center mb-3">
+                                    Problème de connexion ?
+                                </p>
+                                <button onclick="activerModeHorsLigne()" 
+                                        class="w-full bg-orange-100 hover:bg-orange-200 text-orange-700 px-6 py-3 rounded-xl font-medium transition-all">
+                                    📱 Continuer hors ligne
+                                </button>
+                                <p class="text-xs text-slate-500 text-center mt-2">
+                                    Vos données seront sauvegardées localement
+                                </p>
+                            </div>
                         </div>
 
 
@@ -743,23 +964,69 @@
             if (!utilisateurConnecte || !authToken) return;
             
             try {
-                // Pour l'instant, on garde les données locales
-                // Tu pourras ajouter des endpoints pour sauvegarder/charger les budgets plus tard
-                console.log('Données utilisateur chargées (mode local pour l\'instant)');
+                console.log('🔄 Chargement des données utilisateur depuis Supabase...');
+                
+                // Charger toute l'année courante
+                const yearData = await apiCall(`/budget/all/${moisActuel.annee}`);
+                
+                // Fusionner avec les données locales
+                Object.keys(yearData).forEach(month => {
+                    donneesParMois[month] = yearData[month];
+                });
+                
+                console.log('✅ Données utilisateur chargées:', Object.keys(yearData).length, 'mois');
+                mettreAJourAffichage();
+                
             } catch (error) {
-                console.error('Erreur lors du chargement des données:', error);
+                console.error('❌ Erreur lors du chargement des données:', error);
+                // En cas d'erreur, on continue en mode local
             }
         }
         
         async function sauvegarderDonnees() {
+            // Toujours sauvegarder localement
+            sauvegarderDonneesLocales();
+            
+            // Si connecté, sauvegarder aussi sur le serveur
+            if (utilisateurConnecte && authToken) {
+                try {
+                    const cleMois = obtenirCleMois(moisActuel.mois, moisActuel.annee);
+                    const donneesMois = donneesParMois[cleMois];
+                    
+                    if (!donneesMois) return;
+                    
+                    console.log('💾 Sauvegarde serveur en cours pour', cleMois);
+                    
+                    const response = await apiCall(`/budget/${cleMois}`, {
+                        method: 'POST',
+                        body: JSON.stringify(donneesMois)
+                    });
+                    
+                    console.log('✅ Données sauvegardées sur serveur:', response.items_count, 'éléments');
+                    
+                } catch (error) {
+                    console.error('❌ Erreur sauvegarde serveur (données locales conservées):', error);
+                }
+            } else {
+                console.log('📱 Sauvegarde locale uniquement (mode hors ligne)');
+            }
+        }
+        
+        async function chargerMoisSpecifique(mois, annee) {
             if (!utilisateurConnecte || !authToken) return;
             
             try {
-                // Pour l'instant, on garde les données locales
-                // Tu pourras ajouter un endpoint pour sauvegarder les budgets plus tard
-                console.log('Données sauvegardées (mode local pour l\'instant)');
+                const cleMois = obtenirCleMois(mois, annee);
+                console.log('🔄 Chargement du mois', cleMois);
+                
+                const donneesMois = await apiCall(`/budget/${cleMois}`);
+                donneesParMois[cleMois] = donneesMois;
+                
+                console.log('✅ Mois chargé:', cleMois);
+                
             } catch (error) {
-                console.error('Erreur lors de la sauvegarde:', error);
+                console.error('❌ Erreur chargement mois:', error);
+                // Si le mois n'existe pas en base, on garde les données locales
             }
         }
 
@@ -791,9 +1058,9 @@
             return donneesParMois[cle];
         }
 
-        function changerMois(direction) {
+        async function changerMois(direction) {
             // Sauvegarder les données actuelles avant de changer
-            sauvegarderDonneesActuelles();
+            await sauvegarderDonnees();
             
             moisActuel.mois += direction;
             if (moisActuel.mois > 11) {
@@ -803,6 +1070,9 @@
                 moisActuel.mois = 11;
                 moisActuel.annee--;
             }
+            
+            // Charger les données du nouveau mois depuis la base
+            await chargerMoisSpecifique(moisActuel.mois, moisActuel.annee);
             
             // Gérer les reports automatiques
             if (direction > 0) {
@@ -1670,6 +1940,8 @@
             const email = document.getElementById('email-connexion').value;
             const password = document.getElementById('password-connexion').value;
             
+            console.log('🔐 Tentative de connexion pour:', email);
+            
             if (!email || !password) {
                 afficherMessage('Veuillez remplir tous les champs', 'error');
                 return;
@@ -1684,17 +1956,34 @@
             
             afficherMessage('Connexion en cours...', 'info');
             
+            // Test de connexion au serveur d'abord
+            console.log('🔍 Test de connexion au serveur...');
+            const serveurOk = await testerConnexionServeur();
+            if (!serveurOk) {
+                afficherMessage('❌ Serveur inaccessible. Vérifiez votre connexion internet.', 'error');
+                return;
+            }
+            
             try {
+                console.log('📡 Envoi de la requête de connexion...');
                 const response = await apiCall('/login', {
                     method: 'POST',
                     body: JSON.stringify({ email, password })
                 });
                 
+                console.log('✅ Réponse reçue:', response);
+                
+                if (!response.access_token) {
+                    throw new Error('Token d\'accès manquant dans la réponse');
+                }
+                
                 // Stocker le token d'authentification
                 authToken = response.access_token;
                 localStorage.setItem('authToken', authToken);
+                console.log('💾 Token sauvegardé');
                 
                 // Récupérer les informations utilisateur
+                console.log('👤 Récupération des infos utilisateur...');
                 const userInfo = await apiCall('/me');
                 currentUser = userInfo;
                 localStorage.setItem('userEmail', userInfo.email);
@@ -1715,8 +2004,35 @@
                 }, 1000);
                 
             } catch (error) {
-                console.error('Erreur de connexion:', error);
-                afficherMessage(`❌ Erreur de connexion: ${error.message}`, 'error');
+                console.error('❌ Erreur détaillée de connexion:', error);
+                
+                let messageErreur = error.message;
+                
+                // Messages d'erreur plus explicites
+                if (error.message.includes('Failed to fetch')) {
+                    messageErreur = 'Impossible de contacter le serveur. Vérifiez votre connexion.';
+                } else if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+                    messageErreur = 'Email ou mot de passe incorrect.';
+                } else if (error.message.includes('400')) {
+                    messageErreur = 'Données de connexion invalides.';
+                } else if (error.message.includes('500')) {
+                    messageErreur = 'Erreur serveur. Réessayez dans quelques minutes.';
+                } else if (error.message.includes('timeout')) {
+                    messageErreur = 'Délai d\'attente dépassé. Vérifiez votre connexion.';
+                }
+                
+                afficherMessage(`❌ ${messageErreur}`, 'error');
+                
+                // Ajouter un bouton de diagnostic
+                setTimeout(() => {
+                    const messageDiv = document.getElementById('message-connexion');
+                    messageDiv.innerHTML += `
+                        <button onclick="diagnostiquerConnexion()" 
+                                class="mt-3 w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">
+                            🔧 Diagnostiquer le problème
+                        </button>
+                    `;
+                }, 1000);
             }
         }
 
@@ -1845,8 +2161,30 @@
         async function verifierSession() {
             const storedToken = localStorage.getItem('authToken');
             const userEmail = localStorage.getItem('userEmail');
+            const modeHorsLigne = localStorage.getItem('modeHorsLigne');
             
-            if (storedToken && userEmail) {
+            // Vérifier si on était en mode hors ligne
+            if (modeHorsLigne === 'true' && userEmail === 'Mode Hors Ligne') {
+                console.log('📱 Restauration du mode hors ligne');
+                utilisateurConnecte = false;
+                authToken = null;
+                currentUser = { email: 'Mode Hors Ligne', id: 'offline' };
+                
+                // Mettre à jour l'interface pour le mode hors ligne
+                const btnConnexion = document.getElementById('btn-connexion');
+                btnConnexion.innerHTML = `<span class="text-sm">📱</span>`;
+                btnConnexion.title = 'Mode hors ligne - Données locales uniquement';
+                btnConnexion.classList.add('bg-orange-500', 'hover:bg-orange-600');
+                btnConnexion.classList.remove('bg-gradient-to-r', 'from-purple-600', 'to-pink-600', 'hover:from-purple-700', 'hover:to-pink-700');
+                btnConnexion.onclick = () => changerOnglet('connexion');
+                
+                // Charger les données locales
+                chargerDonneesLocales();
+                return;
+            }
+            
+            // Vérification normale de session en ligne
+            if (storedToken && userEmail && userEmail !== 'Mode Hors Ligne') {
                 authToken = storedToken;
                 
                 try {
@@ -1870,10 +2208,16 @@
                     authToken = null;
                     currentUser = null;
                     utilisateurConnecte = false;
+                    
+                    // Charger les données locales en fallback
+                    chargerDonneesLocales();
                 }
             } else {
                 utilisateurConnecte = false;
                 console.log('Aucune session sauvegardée trouvée');
+                
+                // Charger les données locales si disponibles
+                chargerDonneesLocales();
             }
         }
 
@@ -2416,5 +2760,5 @@
             mettreAJourAffichage();
         });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'96c64e51a53ee23a',t:'MTc1NDczMjU3Mi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'96c7337cc37ae224',t:'MTc1NDc0MTk1OS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
