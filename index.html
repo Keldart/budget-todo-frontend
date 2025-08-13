@@ -1,6 +1,2427 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maîtriz - Gestion de Budget</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Configuration backend réel
+        const API_BASE_URL = 'https://fastapi-backend-m2hs.onrender.com';
+        
+        // Variables globales pour l'authentification
+        let authToken = localStorage.getItem('authToken');
+        let currentUser = null;
+        
+        // Fonction pour tester la connexion au serveur
+        async function testerConnexionServeur() {
+            try {
+                console.log('🔍 Test de connexion au serveur:', API_BASE_URL);
+                
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 secondes max
+                
+                const response = await fetch(`${API_BASE_URL}/docs`, {
+                    method: 'GET',
+                    mode: 'cors',
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                console.log('✅ Serveur répond:', response.status);
+                return response.status < 500;
+                
+            } catch (error) {
+                console.error('❌ Serveur inaccessible:', error.name);
+                return false;
+            }
+        }
+        
+        // Fonction pour faire des appels API authentifiés
+        async function apiCall(endpoint, options = {}) {
+            const url = `${API_BASE_URL}${endpoint}`;
+            const headers = {
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
+            
+            // Ajouter le token d'authentification si disponible
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+            
+            console.log(`🔄 API Call: ${endpoint}`, { url, method: options.method || 'GET' });
+            
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    headers,
+                    mode: 'cors'
+                });
+                
+                console.log(`📡 Response ${endpoint}:`, response.status, response.statusText);
+                
+                const data = await response.json();
+                console.log(`📦 Data ${endpoint}:`, data);
+                
+                if (!response.ok) {
+                    throw new Error(data.detail || data.message || `Erreur ${response.status}`);
+                }
+                
+                return data;
+            } catch (error) {
+                console.error(`❌ Erreur API ${endpoint}:`, error);
+                throw error;
+            }
+        }
+    </script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#6366f1',
+                        secondary: '#8b5cf6',
+                        success: '#10b981',
+                        warning: '#f59e0b',
+                        danger: '#ef4444'
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gradient-to-br from-purple-50 via-pink-50 to-indigo-50 min-h-screen font-sans">
+    <div class="container mx-auto px-4 py-8 max-w-7xl">
+        <!-- Header -->
+        <div class="relative text-center mb-8">
+            <!-- Bouton de connexion -->
+            <button id="btn-connexion" onclick="changerOnglet('connexion')" 
+                    class="absolute top-0 right-0 w-12 h-12 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-full shadow-lg transition-all transform hover:scale-105 flex items-center justify-center">
+                <span class="text-xl">👤</span>
+            </button>
+            
+            <h1 class="text-5xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-indigo-600 bg-clip-text text-transparent mb-2">
+                ✨ Maîtriz
+            </h1>
+            <p class="text-slate-600">Maîtrisez vos finances avec élégance</p>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="flex justify-center mb-8">
+            <div class="bg-white rounded-2xl shadow-lg p-2 border border-slate-200">
+                <button id="tab-budget" onclick="changerOnglet('budget')" 
+                        class="px-6 py-3 rounded-xl font-medium transition-all bg-gradient-to-r from-purple-600 to-pink-600 text-white">
+                    💰 Budget Mensuel
+                </button>
+                <button id="tab-resumes" onclick="changerOnglet('resumes')" 
+                        class="px-6 py-3 rounded-xl font-medium transition-all text-slate-600 hover:bg-slate-100">
+                    📊 Résumés
+                </button>
+            </div>
+        </div>
+
+        <!-- Budget Tab -->
+        <div id="content-budget">
+            <!-- Month Navigation -->
+            <div class="flex items-center justify-center mb-8">
+                <div class="bg-white rounded-2xl shadow-lg p-4 border border-slate-200 flex items-center space-x-6">
+                    <button onclick="changerMois(-1)" class="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+                        <span class="text-2xl">←</span>
+                    </button>
+                    <div class="text-center">
+                        <h2 id="mois-actuel" class="text-2xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                            Août 2025
+                        </h2>
+                    </div>
+                    <button onclick="changerMois(1)" class="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+                        <span class="text-2xl">→</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Summary Cards -->
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 md:gap-6 mb-8">
+                <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6 border border-slate-200 cursor-pointer hover:shadow-xl transition-all transform hover:scale-105" onclick="ouvrirModalMobile('revenus')">
+                    <div class="flex items-center justify-between">
+                        <div class="min-w-0 flex-1">
+                            <p class="text-slate-600 text-xs md:text-sm font-medium truncate">Revenus</p>
+                            <p class="text-lg md:text-2xl font-bold text-success truncate" id="total-revenus">0 €</p>
+                        </div>
+                        <div class="bg-success/10 p-2 md:p-3 rounded-full flex-shrink-0 ml-2">
+                            <span class="text-success text-lg md:text-xl">📈</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6 border border-slate-200 cursor-pointer hover:shadow-xl transition-all transform hover:scale-105" onclick="ouvrirModalMobile('depenses')">
+                    <div class="flex items-center justify-between">
+                        <div class="min-w-0 flex-1">
+                            <p class="text-slate-600 text-xs md:text-sm font-medium truncate">Dépenses</p>
+                            <p class="text-lg md:text-2xl font-bold text-danger truncate" id="total-depenses">0 €</p>
+                        </div>
+                        <div class="bg-danger/10 p-2 md:p-3 rounded-full flex-shrink-0 ml-2">
+                            <span class="text-danger text-lg md:text-xl">💸</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6 border border-slate-200 cursor-pointer hover:shadow-xl transition-all transform hover:scale-105" onclick="ouvrirModalMobile('factures')">
+                    <div class="flex items-center justify-between">
+                        <div class="min-w-0 flex-1">
+                            <p class="text-slate-600 text-xs md:text-sm font-medium truncate">Factures</p>
+                            <p class="text-lg md:text-2xl font-bold text-warning truncate" id="total-factures">0 €</p>
+                        </div>
+                        <div class="bg-warning/10 p-2 md:p-3 rounded-full flex-shrink-0 ml-2">
+                            <span class="text-warning text-lg md:text-xl">📋</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6 border border-slate-200 cursor-pointer hover:shadow-xl transition-all transform hover:scale-105" onclick="ouvrirModalMobile('investissements')">
+                    <div class="flex items-center justify-between">
+                        <div class="min-w-0 flex-1">
+                            <p class="text-slate-600 text-xs md:text-sm font-medium truncate">Investissements</p>
+                            <p class="text-lg md:text-2xl font-bold text-purple-600 truncate" id="total-investissements">0 €</p>
+                        </div>
+                        <div class="bg-purple-100 p-2 md:p-3 rounded-full flex-shrink-0 ml-2">
+                            <span class="text-purple-600 text-lg md:text-xl">💰</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6 border border-slate-200 cursor-pointer hover:shadow-xl transition-all transform hover:scale-105" onclick="ouvrirModalMobile('epargnes')">
+                    <div class="flex items-center justify-between">
+                        <div class="min-w-0 flex-1">
+                            <p class="text-slate-600 text-xs md:text-sm font-medium truncate">Épargne</p>
+                            <p class="text-lg md:text-2xl font-bold text-blue-600 truncate" id="total-epargnes">0 €</p>
+                        </div>
+                        <div class="bg-blue-100 p-2 md:p-3 rounded-full flex-shrink-0 ml-2">
+                            <span class="text-blue-600 text-lg md:text-xl">🏦</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6 border border-slate-200">
+                    <div class="flex items-center justify-between">
+                        <div class="min-w-0 flex-1">
+                            <p class="text-slate-600 text-xs md:text-sm font-medium truncate">Solde</p>
+                            <p class="text-lg md:text-2xl font-bold text-primary truncate" id="solde">0 €</p>
+                        </div>
+                        <div class="bg-primary/10 p-2 md:p-3 rounded-full flex-shrink-0 ml-2">
+                            <span class="text-primary text-lg md:text-xl">💳</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Left Column - Forms (Hidden on mobile) -->
+                <div class="lg:col-span-2 space-y-6 hidden md:block">
+                    <!-- Revenus Section -->
+                    <div class="bg-white rounded-2xl shadow-lg p-6 border border-slate-200">
+                        <div class="flex items-center justify-between mb-6">
+                            <h2 class="text-xl font-bold text-slate-800 flex items-center">
+                                <span class="bg-success/10 p-2 rounded-lg mr-3">📈</span>
+                                Revenus
+                            </h2>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <input type="text" id="revenu-nom" placeholder="Source de revenu" 
+                                   class="px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-success focus:border-transparent outline-none transition-all">
+                            <input type="number" id="revenu-montant" placeholder="Montant (€)" 
+                                   class="px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-success focus:border-transparent outline-none transition-all">
+                            <button onclick="ajouterRevenu()" 
+                                    class="bg-success hover:bg-success/90 text-white px-6 py-3 rounded-xl font-medium transition-all transform hover:scale-105">
+                                Ajouter
+                            </button>
+                        </div>
+                        
+                        <div id="liste-revenus" class="space-y-2"></div>
+                    </div>
+
+                    <!-- Dépenses Section -->
+                    <div class="bg-white rounded-2xl shadow-lg p-6 border border-slate-200">
+                        <div class="flex items-center justify-between mb-6">
+                            <h2 class="text-xl font-bold text-slate-800 flex items-center">
+                                <span class="bg-danger/10 p-2 rounded-lg mr-3">💸</span>
+                                Dépenses
+                            </h2>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <input type="text" id="depense-nom" placeholder="Description" 
+                                   class="px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-danger focus:border-transparent outline-none transition-all">
+                            <input type="number" id="depense-montant" placeholder="Montant (€)" 
+                                   class="px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-danger focus:border-transparent outline-none transition-all">
+                            <button onclick="ajouterDepense()" 
+                                    class="bg-danger hover:bg-danger/90 text-white px-6 py-3 rounded-xl font-medium transition-all transform hover:scale-105">
+                                Ajouter
+                            </button>
+                        </div>
+                        
+                        <div id="liste-depenses" class="space-y-2"></div>
+                    </div>
+
+                    <!-- Factures & Abonnements Section -->
+                    <div class="bg-white rounded-2xl shadow-lg p-6 border border-slate-200">
+                        <div class="flex items-center justify-between mb-6">
+                            <h2 class="text-xl font-bold text-slate-800 flex items-center">
+                                <span class="bg-warning/10 p-2 rounded-lg mr-3">📋</span>
+                                Factures & Abonnements
+                            </h2>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                            <input type="text" id="facture-nom" placeholder="Nom de la facture" 
+                                   class="px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-warning focus:border-transparent outline-none transition-all">
+                            <input type="number" id="facture-montant" placeholder="Montant (€)" 
+                                   class="px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-warning focus:border-transparent outline-none transition-all">
+                            <div class="flex items-center px-4 py-3 border border-slate-300 rounded-xl">
+                                <input type="checkbox" id="facture-recurrente" class="mr-2 w-4 h-4 text-warning">
+                                <label for="facture-recurrente" class="text-sm text-slate-700">Récurrente</label>
+                            </div>
+                            <button onclick="ajouterFacture()" 
+                                    class="bg-warning hover:bg-warning/90 text-white px-6 py-3 rounded-xl font-medium transition-all transform hover:scale-105">
+                                Ajouter
+                            </button>
+                        </div>
+                        
+                        <div id="liste-factures" class="space-y-2"></div>
+                    </div>
+
+                    <!-- Investissements et Épargne Section -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Investissements -->
+                        <div class="bg-white rounded-2xl shadow-lg p-6 border border-slate-200">
+                            <div class="flex items-center justify-between mb-6">
+                                <h2 class="text-xl font-bold text-slate-800 flex items-center">
+                                    <span class="bg-purple-100 p-2 rounded-lg mr-3">📈</span>
+                                    Investissements
+                                </h2>
+
+                            </div>
+                            
+                            <div class="space-y-4 mb-4">
+                                <input type="text" id="investissement-nom" placeholder="Type d'investissement" 
+                                       class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all">
+                                <input type="number" id="investissement-montant" placeholder="Montant (€)" 
+                                       class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all">
+                                <button onclick="ajouterInvestissement()" 
+                                        class="w-full bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-all transform hover:scale-105">
+                                    Ajouter
+                                </button>
+                            </div>
+                            
+                            <div id="liste-investissements" class="space-y-2"></div>
+                        </div>
+
+                        <!-- Épargne -->
+                        <div class="bg-white rounded-2xl shadow-lg p-6 border border-slate-200">
+                            <div class="flex items-center justify-between mb-6">
+                                <h2 class="text-xl font-bold text-slate-800 flex items-center">
+                                    <span class="bg-blue-100 p-2 rounded-lg mr-3">🏦</span>
+                                    Épargne
+                                </h2>
+
+                            </div>
+                            
+                            <div class="space-y-4 mb-4">
+                                <input type="text" id="epargne-nom" placeholder="Type d'épargne" 
+                                       class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all">
+                                <input type="number" id="epargne-montant" placeholder="Montant (€)" 
+                                       class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all">
+                                <button onclick="ajouterEpargne()" 
+                                        class="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-medium transition-all transform hover:scale-105">
+                                    Ajouter
+                                </button>
+                            </div>
+                            
+                            <div id="liste-epargnes" class="space-y-2"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column - Chart -->
+                <div class="bg-white rounded-2xl shadow-lg p-6 border border-slate-200 md:col-span-1 lg:col-span-1">
+                    <h2 class="text-xl font-bold text-slate-800 mb-6 flex items-center">
+                        <span class="bg-gradient-to-r from-purple-100 to-pink-100 p-2 rounded-lg mr-3">📊</span>
+                        Répartition du Budget
+                    </h2>
+                    
+                    <div class="flex justify-center mb-6">
+                        <canvas id="budgetChart" width="300" height="300"></canvas>
+                    </div>
+                    
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center">
+                                <div class="w-4 h-4 bg-success rounded-full mr-3"></div>
+                                <span class="text-slate-700">Budget Restant</span>
+                            </div>
+                            <span class="font-semibold text-success" id="chart-restant">0 €</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center">
+                                <div class="w-4 h-4 bg-danger rounded-full mr-3"></div>
+                                <span class="text-slate-700">Dépenses</span>
+                            </div>
+                            <span class="font-semibold text-danger" id="chart-depenses">0 €</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center">
+                                <div class="w-4 h-4 bg-warning rounded-full mr-3"></div>
+                                <span class="text-slate-700">Factures</span>
+                            </div>
+                            <span class="font-semibold text-warning" id="chart-factures">0 €</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center">
+                                <div class="w-4 h-4 bg-purple-600 rounded-full mr-3"></div>
+                                <span class="text-slate-700">Investissements</span>
+                            </div>
+                            <span class="font-semibold text-purple-600" id="chart-investissements">0 €</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center">
+                                <div class="w-4 h-4 bg-blue-600 rounded-full mr-3"></div>
+                                <span class="text-slate-700">Épargne</span>
+                            </div>
+                            <span class="font-semibold text-blue-600" id="chart-epargnes">0 €</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Connexion Tab -->
+        <div id="content-connexion" class="hidden">
+            <div class="max-w-md mx-auto">
+                <div class="bg-white rounded-2xl shadow-lg p-8 border border-slate-200">
+                    <div class="text-center mb-8">
+                        <div class="w-16 h-16 bg-gradient-to-r from-purple-600 to-pink-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <span class="text-2xl text-white">🔐</span>
+                        </div>
+                        <h2 class="text-2xl font-bold text-slate-800 mb-2">Bienvenue sur Maîtriz</h2>
+                        <p class="text-slate-600">Connectez-vous pour synchroniser vos données</p>
+                    </div>
+
+                    <!-- Formulaire de connexion/inscription -->
+                    <div id="form-connexion">
+                        <div class="space-y-4 mb-6">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-2">Email</label>
+                                <input type="email" id="email-connexion" placeholder="votre@email.com" 
+                                       class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-2">Mot de passe</label>
+                                <input type="password" id="password-connexion" placeholder="••••••••" 
+                                       class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all">
+                            </div>
+                        </div>
+
+                        <!-- Boutons de connexion -->
+                        <div class="space-y-3 mb-6">
+                            <button id="btn-principal-connexion" onclick="seConnecter()" 
+                                    class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-6 py-3 rounded-xl font-medium transition-all transform hover:scale-105">
+                                Se connecter
+                            </button>
+                            <button onclick="basculerModeInscription()" 
+                                    class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-3 rounded-xl font-medium transition-all">
+                                <span id="texte-bascule">Pas encore de compte ? S'inscrire</span>
+                            </button>
+                        </div>
+
+
+                    </div>
+
+                    <!-- Messages d'état -->
+                    <div id="message-connexion" class="hidden mt-4 p-3 rounded-lg text-center"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Abonnement Tab -->
+        <div id="content-abonnement" class="hidden">
+            <div class="max-w-4xl mx-auto">
+                <div class="text-center mb-8">
+                    <h2 class="text-3xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-indigo-600 bg-clip-text text-transparent mb-4">
+                        Choisissez votre abonnement
+                    </h2>
+                    <p class="text-slate-600 text-lg">Débloquez toutes les fonctionnalités de Maîtriz</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                    <!-- Offre Mensuelle -->
+                    <div class="bg-white rounded-2xl shadow-lg p-8 border border-slate-200 relative">
+                        <div class="absolute -top-4 left-1/2 transform -translate-x-1/2">
+                            <span class="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2 rounded-full text-sm font-medium">
+                                ⭐ Populaire
+                            </span>
+                        </div>
+                        
+                        <div class="text-center mb-6">
+                            <div class="w-16 h-16 bg-gradient-to-r from-purple-100 to-pink-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <span class="text-2xl">📅</span>
+                            </div>
+                            <h3 class="text-2xl font-bold text-slate-800 mb-2">Abonnement Mensuel</h3>
+                            <div class="text-4xl font-bold text-purple-600 mb-2">4,99 €</div>
+                            <p class="text-slate-600">par mois</p>
+                        </div>
+
+                        <div class="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+                            <div class="flex items-center justify-center text-green-700">
+                                <span class="text-xl mr-2">🎁</span>
+                                <span class="font-semibold">14 jours d'essai gratuit</span>
+                            </div>
+                            <p class="text-green-600 text-sm text-center mt-1">
+                                Aucun engagement, annulable à tout moment
+                            </p>
+                        </div>
+
+                        <ul class="space-y-3 mb-8">
+                            <li class="flex items-center text-slate-700">
+                                <span class="text-green-500 mr-3">✓</span>
+                                Budget illimité
+                            </li>
+                            <li class="flex items-center text-slate-700">
+                                <span class="text-green-500 mr-3">✓</span>
+                                Synchronisation cloud
+                            </li>
+                            <li class="flex items-center text-slate-700">
+                                <span class="text-green-500 mr-3">✓</span>
+                                Rapports détaillés
+                            </li>
+                            <li class="flex items-center text-slate-700">
+                                <span class="text-green-500 mr-3">✓</span>
+                                Support prioritaire
+                            </li>
+                            <li class="flex items-center text-slate-700">
+                                <span class="text-green-500 mr-3">✓</span>
+                                Notifications personnalisées
+                            </li>
+                        </ul>
+
+                        <button onclick="choisirAbonnement('mensuel')" 
+                                class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-6 py-4 rounded-xl font-medium transition-all transform hover:scale-105">
+                            Commencer l'essai gratuit
+                        </button>
+                    </div>
+
+                    <!-- Offre Annuelle -->
+                    <div class="bg-white rounded-2xl shadow-lg p-8 border border-slate-200 relative">
+                        <div class="absolute -top-4 left-1/2 transform -translate-x-1/2">
+                            <span class="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-4 py-2 rounded-full text-sm font-medium">
+                                💰 Économie
+                            </span>
+                        </div>
+                        
+                        <div class="text-center mb-6">
+                            <div class="w-16 h-16 bg-gradient-to-r from-green-100 to-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <span class="text-2xl">🏆</span>
+                            </div>
+                            <h3 class="text-2xl font-bold text-slate-800 mb-2">Abonnement Annuel</h3>
+                            <div class="text-4xl font-bold text-green-600 mb-2">49,99 €</div>
+                            <p class="text-slate-600">par an</p>
+                            <div class="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-medium mt-2 inline-block">
+                                Économisez 17% !
+                            </div>
+                        </div>
+
+                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+                            <div class="flex items-center justify-center text-blue-700">
+                                <span class="text-xl mr-2">💎</span>
+                                <span class="font-semibold">Meilleure valeur</span>
+                            </div>
+                            <p class="text-blue-600 text-sm text-center mt-1">
+                                Équivaut à 4,17€/mois seulement
+                            </p>
+                        </div>
+
+                        <ul class="space-y-3 mb-8">
+                            <li class="flex items-center text-slate-700">
+                                <span class="text-green-500 mr-3">✓</span>
+                                Budget illimité
+                            </li>
+                            <li class="flex items-center text-slate-700">
+                                <span class="text-green-500 mr-3">✓</span>
+                                Synchronisation cloud
+                            </li>
+                            <li class="flex items-center text-slate-700">
+                                <span class="text-green-500 mr-3">✓</span>
+                                Rapports détaillés
+                            </li>
+                            <li class="flex items-center text-slate-700">
+                                <span class="text-green-500 mr-3">✓</span>
+                                Support prioritaire
+                            </li>
+                            <li class="flex items-center text-slate-700">
+                                <span class="text-green-500 mr-3">✓</span>
+                                Notifications personnalisées
+                            </li>
+                            <li class="flex items-center text-slate-700">
+                                <span class="text-purple-500 mr-3">✓</span>
+                                <strong>Fonctionnalités premium exclusives</strong>
+                            </li>
+                        </ul>
+
+                        <button onclick="choisirAbonnement('annuel')" 
+                                class="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white px-6 py-4 rounded-xl font-medium transition-all transform hover:scale-105">
+                            Choisir l'abonnement annuel
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Garanties et sécurité -->
+                <div class="bg-slate-50 rounded-2xl p-6 text-center">
+                    <div class="flex justify-center items-center space-x-8 text-slate-600">
+                        <div class="flex items-center">
+                            <span class="text-2xl mr-2">🔒</span>
+                            <span class="text-sm">Paiement sécurisé</span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-2xl mr-2">↩️</span>
+                            <span class="text-sm">Remboursement 30j</span>
+                        </div>
+                        <div class="flex items-center">
+                            <span class="text-2xl mr-2">🚫</span>
+                            <span class="text-sm">Annulation facile</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Résumés Tab -->
+        <div id="content-resumes" class="hidden">
+            <!-- Sélecteurs de période -->
+            <div class="bg-white rounded-2xl shadow-lg p-6 border border-slate-200 mb-8">
+                <h2 class="text-xl font-bold text-slate-800 mb-6 flex items-center">
+                    <span class="bg-gradient-to-r from-purple-100 to-pink-100 p-2 rounded-lg mr-3">📅</span>
+                    Sélection de la période
+                </h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Résumé personnalisé -->
+                    <div class="space-y-4">
+                        <h3 class="font-semibold text-slate-700">Résumé personnalisé</h3>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-600 mb-2">Mois de début</label>
+                                <select id="mois-debut" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none">
+                                    <option value="0">Janvier</option>
+                                    <option value="1">Février</option>
+                                    <option value="2">Mars</option>
+                                    <option value="3">Avril</option>
+                                    <option value="4">Mai</option>
+                                    <option value="5">Juin</option>
+                                    <option value="6">Juillet</option>
+                                    <option value="7">Août</option>
+                                    <option value="8">Septembre</option>
+                                    <option value="9">Octobre</option>
+                                    <option value="10">Novembre</option>
+                                    <option value="11">Décembre</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-600 mb-2">Mois de fin</label>
+                                <select id="mois-fin" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none">
+                                    <option value="0">Janvier</option>
+                                    <option value="1">Février</option>
+                                    <option value="2">Mars</option>
+                                    <option value="3">Avril</option>
+                                    <option value="4">Mai</option>
+                                    <option value="5">Juin</option>
+                                    <option value="6">Juillet</option>
+                                    <option value="7">Août</option>
+                                    <option value="8">Septembre</option>
+                                    <option value="9">Octobre</option>
+                                    <option value="10">Novembre</option>
+                                    <option value="11">Décembre</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-600 mb-2">Année de début</label>
+                                <select id="annee-debut" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none">
+                                    <option value="2023">2023</option>
+                                    <option value="2024">2024</option>
+                                    <option value="2025">2025</option>
+                                    <option value="2026">2026</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-600 mb-2">Année de fin</label>
+                                <select id="annee-fin" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none">
+                                    <option value="2023">2023</option>
+                                    <option value="2024">2024</option>
+                                    <option value="2025">2025</option>
+                                    <option value="2026">2026</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button onclick="mettreAJourResumePersonnalise()" 
+                                class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-4 py-2 rounded-lg font-medium transition-all">
+                            Mettre à jour le résumé
+                        </button>
+                    </div>
+                    
+                    <!-- Raccourcis -->
+                    <div class="space-y-4">
+                        <h3 class="font-semibold text-slate-700">Raccourcis</h3>
+                        <div class="grid grid-cols-2 gap-3">
+                            <button onclick="definirPeriode('3mois')" 
+                                    class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-4 py-2 rounded-lg font-medium transition-all">
+                                3 derniers mois
+                            </button>
+                            <button onclick="definirPeriode('6mois')" 
+                                    class="bg-green-100 hover:bg-green-200 text-green-700 px-4 py-2 rounded-lg font-medium transition-all">
+                                6 derniers mois
+                            </button>
+                            <button onclick="definirPeriode('annee')" 
+                                    class="bg-purple-100 hover:bg-purple-200 text-purple-700 px-4 py-2 rounded-lg font-medium transition-all">
+                                Année complète
+                            </button>
+                            <button onclick="definirPeriode('reset')" 
+                                    class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-medium transition-all">
+                                Réinitialiser
+                            </button>
+                        </div>
+                        <div class="text-sm text-slate-600 bg-slate-50 p-3 rounded-lg">
+                            <strong>Période actuelle :</strong> <span id="periode-actuelle">3 derniers mois</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <!-- Résumé personnalisé -->
+                <div class="bg-white rounded-2xl shadow-lg p-6 border border-slate-200">
+                    <h2 class="text-xl font-bold text-slate-800 mb-6 flex items-center">
+                        <span class="bg-gradient-to-r from-purple-100 to-pink-100 p-2 rounded-lg mr-3">📊</span>
+                        <span id="titre-resume-personnalise">Résumé personnalisé</span>
+                    </h2>
+                    
+                    <div class="flex justify-center mb-6">
+                        <canvas id="chartPersonnalise" width="300" height="300"></canvas>
+                    </div>
+                    
+                    <div id="legende-personnalise" class="space-y-2"></div>
+                </div>
+
+                <!-- Résumé annuel -->
+                <div class="bg-white rounded-2xl shadow-lg p-6 border border-slate-200">
+                    <h2 class="text-xl font-bold text-slate-800 mb-6 flex items-center">
+                        <span class="bg-gradient-to-r from-purple-100 to-pink-100 p-2 rounded-lg mr-3">📈</span>
+                        Résumé annuel 2025
+                    </h2>
+                    
+                    <div class="flex justify-center mb-6">
+                        <canvas id="chartAnnuel" width="300" height="300"></canvas>
+                    </div>
+                    
+                    <div id="legende-annuel" class="space-y-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration Supabase déjà initialisée dans le head
+
+        // Variables globales
+        let moisActuel = { mois: 7, annee: 2025 }; // Août 2025 (0-indexé)
+        let donneesParMois = {};
+        let chart = null;
+        let periodePersonnalisee = null; // Pour stocker la période sélectionnée
+        
+        // Fonctions de gestion des données avec backend
+        async function chargerDonneesUtilisateur() {
+            if (!utilisateurConnecte || !authToken) return;
+            
+            try {
+                // Pour l'instant, on garde les données locales
+                // Tu pourras ajouter des endpoints pour sauvegarder/charger les budgets plus tard
+                console.log('Données utilisateur chargées (mode local pour l\'instant)');
+            } catch (error) {
+                console.error('Erreur lors du chargement des données:', error);
+            }
+        }
+        
+        async function sauvegarderDonnees() {
+            if (!utilisateurConnecte || !authToken) return;
+            
+            try {
+                // Pour l'instant, on garde les données locales
+                // Tu pourras ajouter un endpoint pour sauvegarder les budgets plus tard
+                console.log('Données sauvegardées (mode local pour l\'instant)');
+            } catch (error) {
+                console.error('Erreur lors de la sauvegarde:', error);
+            }
+        }
+
+        // Noms des mois
+        const nomsMois = [
+            'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+            'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
+        ];
+
+        // Initialisation du canvas
+        const canvas = document.getElementById('budgetChart');
+        const ctx = canvas.getContext('2d');
+
+        function obtenirCleMois(mois, annee) {
+            return `${annee}-${mois.toString().padStart(2, '0')}`;
+        }
+
+        function obtenirDonneesMois(mois, annee) {
+            const cle = obtenirCleMois(mois, annee);
+            if (!donneesParMois[cle]) {
+                donneesParMois[cle] = {
+                    revenus: [],
+                    depenses: [],
+                    factures: [],
+                    investissements: [],
+                    epargnes: []
+                };
+            }
+            return donneesParMois[cle];
+        }
+
+        function changerMois(direction) {
+            // Sauvegarder les données actuelles avant de changer
+            sauvegarderDonneesActuelles();
+            
+            moisActuel.mois += direction;
+            if (moisActuel.mois > 11) {
+                moisActuel.mois = 0;
+                moisActuel.annee++;
+            } else if (moisActuel.mois < 0) {
+                moisActuel.mois = 11;
+                moisActuel.annee--;
+            }
+            
+            // Gérer les reports automatiques
+            if (direction > 0) {
+                gererReportsAutomatiques();
+            }
+            
+            chargerDonneesMois();
+            mettreAJourAffichageMois();
+            mettreAJourAffichage();
+        }
+
+        function gererReportsAutomatiques() {
+            const moisPrecedent = { ...moisActuel };
+            moisPrecedent.mois -= 1;
+            if (moisPrecedent.mois < 0) {
+                moisPrecedent.mois = 11;
+                moisPrecedent.annee--;
+            }
+            
+            const donneesPrecedentes = obtenirDonneesMois(moisPrecedent.mois, moisPrecedent.annee);
+            const donneesActuelles = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+            
+            // Reporter le budget restant - ne compter que les nouveaux investissements/épargnes du mois précédent
+            const totalRevenusPrecedent = donneesPrecedentes.revenus.reduce((sum, item) => sum + item.montant, 0);
+            const totalDepensesPrecedent = donneesPrecedentes.depenses.reduce((sum, item) => sum + item.montant, 0);
+            const totalFacturesPrecedent = donneesPrecedentes.factures.reduce((sum, item) => sum + item.montant, 0);
+            const investissementsNouveauxPrecedent = donneesPrecedentes.investissements.filter(item => !item.reporte).reduce((sum, item) => sum + item.montant, 0);
+            const epargnesNouveauxPrecedent = donneesPrecedentes.epargnes.filter(item => !item.reporte).reduce((sum, item) => sum + item.montant, 0);
+            
+            const budgetRestant = totalRevenusPrecedent - totalDepensesPrecedent - totalFacturesPrecedent - investissementsNouveauxPrecedent - epargnesNouveauxPrecedent;
+            
+            if (budgetRestant > 0) {
+                const existeReport = donneesActuelles.revenus.find(r => r.nom === "Report du mois précédent");
+                if (!existeReport) {
+                    donneesActuelles.revenus.push({
+                        nom: "Report du mois précédent",
+                        montant: budgetRestant
+                    });
+                }
+            }
+            
+            // Reporter les factures récurrentes
+            donneesPrecedentes.factures.forEach(facture => {
+                if (facture.recurrente) {
+                    const existeFacture = donneesActuelles.factures.find(f => f.nom === facture.nom);
+                    if (!existeFacture) {
+                        donneesActuelles.factures.push({
+                            nom: facture.nom,
+                            montant: facture.montant,
+                            recurrente: true
+                        });
+                    }
+                }
+            });
+            
+            // Reporter les investissements (pour affichage seulement, pas pour le calcul du solde)
+            donneesPrecedentes.investissements.forEach(investissement => {
+                const existeInvestissement = donneesActuelles.investissements.find(i => i.nom === investissement.nom);
+                if (!existeInvestissement) {
+                    donneesActuelles.investissements.push({
+                        nom: investissement.nom,
+                        montant: investissement.montant,
+                        reporte: true // Marquer comme reporté
+                    });
+                }
+            });
+            
+            // Reporter les épargnes (pour affichage seulement, pas pour le calcul du solde)
+            donneesPrecedentes.epargnes.forEach(epargne => {
+                const existeEpargne = donneesActuelles.epargnes.find(e => e.nom === epargne.nom);
+                if (!existeEpargne) {
+                    donneesActuelles.epargnes.push({
+                        nom: epargne.nom,
+                        montant: epargne.montant,
+                        reporte: true // Marquer comme reporté
+                    });
+                }
+            });
+        }
+
+        function sauvegarderDonneesActuelles() {
+            const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+            // Les données sont déjà sauvegardées dans donneesParMois via les fonctions d'ajout
+        }
+
+        function chargerDonneesMois() {
+            const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+            // Les données sont chargées automatiquement via obtenirDonneesMois
+        }
+
+        function mettreAJourAffichageMois() {
+            document.getElementById('mois-actuel').textContent = 
+                `${nomsMois[moisActuel.mois]} ${moisActuel.annee}`;
+        }
+
+        function changerOnglet(onglet) {
+            // Masquer tous les contenus
+            document.getElementById('content-budget').classList.add('hidden');
+            document.getElementById('content-resumes').classList.add('hidden');
+            document.getElementById('content-connexion').classList.add('hidden');
+            document.getElementById('content-abonnement').classList.add('hidden');
+            
+            // Réinitialiser les styles des onglets
+            document.getElementById('tab-budget').className = 'px-6 py-3 rounded-xl font-medium transition-all text-slate-600 hover:bg-slate-100';
+            document.getElementById('tab-resumes').className = 'px-6 py-3 rounded-xl font-medium transition-all text-slate-600 hover:bg-slate-100';
+            
+            // Afficher le contenu sélectionné
+            if (onglet === 'budget') {
+                document.getElementById('content-budget').classList.remove('hidden');
+                document.getElementById('tab-budget').className = 'px-6 py-3 rounded-xl font-medium transition-all bg-gradient-to-r from-purple-600 to-pink-600 text-white';
+            } else if (onglet === 'resumes') {
+                document.getElementById('content-resumes').classList.remove('hidden');
+                document.getElementById('tab-resumes').className = 'px-6 py-3 rounded-xl font-medium transition-all bg-gradient-to-r from-purple-600 to-pink-600 text-white';
+                initialiserSelecteursDate();
+                mettreAJourResumes();
+            } else if (onglet === 'connexion') {
+                document.getElementById('content-connexion').classList.remove('hidden');
+            } else if (onglet === 'abonnement') {
+                document.getElementById('content-abonnement').classList.remove('hidden');
+            }
+        }
+
+        function ajouterRevenu() {
+            const nom = document.getElementById('revenu-nom').value;
+            const montant = parseFloat(document.getElementById('revenu-montant').value);
+            
+            if (nom && montant > 0) {
+                const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+                donnees.revenus.push({ nom, montant });
+                document.getElementById('revenu-nom').value = '';
+                document.getElementById('revenu-montant').value = '';
+                mettreAJourAffichage();
+                sauvegarderDonnees(); // Auto-sauvegarde
+            }
+        }
+
+        function ajouterDepense() {
+            const nom = document.getElementById('depense-nom').value;
+            const montant = parseFloat(document.getElementById('depense-montant').value);
+            
+            if (nom && montant > 0) {
+                const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+                donnees.depenses.push({ nom, montant });
+                document.getElementById('depense-nom').value = '';
+                document.getElementById('depense-montant').value = '';
+                mettreAJourAffichage();
+                sauvegarderDonnees(); // Auto-sauvegarde
+            }
+        }
+
+        function ajouterFacture() {
+            const nom = document.getElementById('facture-nom').value;
+            const montant = parseFloat(document.getElementById('facture-montant').value);
+            const recurrente = document.getElementById('facture-recurrente').checked;
+            
+            if (nom && montant > 0) {
+                const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+                donnees.factures.push({ nom, montant, recurrente });
+                document.getElementById('facture-nom').value = '';
+                document.getElementById('facture-montant').value = '';
+                document.getElementById('facture-recurrente').checked = false;
+                mettreAJourAffichage();
+                sauvegarderDonnees(); // Auto-sauvegarde
+            }
+        }
+
+        function ajouterInvestissement() {
+            const nom = document.getElementById('investissement-nom').value;
+            const montant = parseFloat(document.getElementById('investissement-montant').value);
+            
+            if (nom && montant > 0) {
+                const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+                donnees.investissements.push({ nom, montant });
+                document.getElementById('investissement-nom').value = '';
+                document.getElementById('investissement-montant').value = '';
+                mettreAJourAffichage();
+                sauvegarderDonnees(); // Auto-sauvegarde
+            }
+        }
+
+        function ajouterEpargne() {
+            const nom = document.getElementById('epargne-nom').value;
+            const montant = parseFloat(document.getElementById('epargne-montant').value);
+            
+            if (nom && montant > 0) {
+                const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+                donnees.epargnes.push({ nom, montant });
+                document.getElementById('epargne-nom').value = '';
+                document.getElementById('epargne-montant').value = '';
+                mettreAJourAffichage();
+                sauvegarderDonnees(); // Auto-sauvegarde
+            }
+        }
+
+        function ajouterMontant(type, index) {
+            const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+            let item;
+            
+            if (type === 'investissement') {
+                item = donnees.investissements[index];
+            } else if (type === 'epargne') {
+                item = donnees.epargnes[index];
+            }
+            
+            if (!item) return;
+            
+            // Créer une modal personnalisée au lieu d'utiliser prompt
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+            modal.innerHTML = `
+                <div class="bg-white rounded-2xl p-6 max-w-md w-full mx-4">
+                    <h3 class="text-lg font-bold mb-4">Ajouter à "${item.nom}"</h3>
+                    <p class="text-slate-600 mb-4">Montant actuel: ${item.montant.toFixed(2)} €</p>
+                    <input type="number" id="montant-input" placeholder="Montant à ajouter" 
+                           class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-success focus:border-transparent outline-none mb-4">
+                    <div class="flex space-x-3">
+                        <button onclick="confirmerAjout('${type}', ${index})" 
+                                class="flex-1 bg-success hover:bg-success/90 text-white px-4 py-2 rounded-xl font-medium">
+                            Confirmer
+                        </button>
+                        <button onclick="fermerModal()" 
+                                class="flex-1 bg-slate-300 hover:bg-slate-400 text-slate-700 px-4 py-2 rounded-xl font-medium">
+                            Annuler
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            document.getElementById('montant-input').focus();
+        }
+
+        function confirmerAjout(type, index) {
+            const montantAjouter = parseFloat(document.getElementById('montant-input').value);
+            const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+            let item;
+            
+            if (type === 'investissement') {
+                item = donnees.investissements[index];
+            } else if (type === 'epargne') {
+                item = donnees.epargnes[index];
+            }
+            
+            if (!isNaN(montantAjouter) && montantAjouter > 0) {
+                // Vérifier si on a assez de revenus disponibles
+                const totalRevenus = donnees.revenus.reduce((sum, item) => sum + item.montant, 0);
+                const totalDepenses = donnees.depenses.reduce((sum, item) => sum + item.montant, 0);
+                const totalFactures = donnees.factures.reduce((sum, item) => sum + item.montant, 0);
+                
+                // Ne compter que les nouveaux investissements/épargnes pour le calcul des revenus disponibles
+                const investissementsNouveaux = donnees.investissements.filter(item => !item.reporte).reduce((sum, item) => sum + item.montant, 0);
+                const epargnesNouveaux = donnees.epargnes.filter(item => !item.reporte).reduce((sum, item) => sum + item.montant, 0);
+                
+                const revenus_disponibles = totalRevenus - totalDepenses - totalFactures - investissementsNouveaux - epargnesNouveaux;
+                
+                if (revenus_disponibles >= montantAjouter) {
+                    item.montant += montantAjouter;
+                    // Marquer comme non-reporté si on ajoute de l'argent
+                    if (item.reporte) {
+                        item.reporte = false;
+                    }
+                    fermerModal();
+                    mettreAJourAffichage();
+                    sauvegarderDonnees(); // Auto-sauvegarde
+                } else {
+                    alert(`Revenus disponibles insuffisants ! Vous avez ${revenus_disponibles.toFixed(2)} € disponibles.`);
+                }
+            }
+        }
+
+        function retirerMontant(type, index) {
+            const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+            let item, liste;
+            
+            if (type === 'investissement') {
+                item = donnees.investissements[index];
+                liste = donnees.investissements;
+            } else if (type === 'epargne') {
+                item = donnees.epargnes[index];
+                liste = donnees.epargnes;
+            }
+            
+            if (!item) return;
+            
+            // Créer une modal personnalisée au lieu d'utiliser prompt
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+            modal.innerHTML = `
+                <div class="bg-white rounded-2xl p-6 max-w-md w-full mx-4">
+                    <h3 class="text-lg font-bold mb-4">Retirer de "${item.nom}"</h3>
+                    <p class="text-slate-600 mb-4">Montant actuel: ${item.montant.toFixed(2)} €</p>
+                    <input type="number" id="montant-input-retrait" placeholder="Montant à retirer" 
+                           class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-warning focus:border-transparent outline-none mb-4">
+                    <div class="flex space-x-3">
+                        <button onclick="confirmerRetrait('${type}', ${index})" 
+                                class="flex-1 bg-warning hover:bg-warning/90 text-white px-4 py-2 rounded-xl font-medium">
+                            Confirmer
+                        </button>
+                        <button onclick="fermerModal()" 
+                                class="flex-1 bg-slate-300 hover:bg-slate-400 text-slate-700 px-4 py-2 rounded-xl font-medium">
+                            Annuler
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            document.getElementById('montant-input-retrait').focus();
+        }
+
+        function confirmerRetrait(type, index) {
+            const montantRetirer = parseFloat(document.getElementById('montant-input-retrait').value);
+            const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+            let item, liste;
+            
+            if (type === 'investissement') {
+                item = donnees.investissements[index];
+                liste = donnees.investissements;
+            } else if (type === 'epargne') {
+                item = donnees.epargnes[index];
+                liste = donnees.epargnes;
+            }
+            
+            if (!isNaN(montantRetirer) && montantRetirer > 0) {
+                if (montantRetirer <= item.montant) {
+                    item.montant -= montantRetirer;
+                    
+                    // Le montant retiré devient disponible dans le budget (pas ajouté aux revenus)
+                    // Il sera automatiquement visible dans le solde/budget restant
+                    
+                    // Si le montant devient 0, supprimer l'élément
+                    if (item.montant === 0) {
+                        liste.splice(index, 1);
+                    }
+                    
+                    fermerModal();
+                    mettreAJourAffichage();
+                    sauvegarderDonnees(); // Auto-sauvegarde
+                } else {
+                    alert(`Vous ne pouvez pas retirer plus que le montant actuel (${item.montant.toFixed(2)} €) !`);
+                }
+            }
+        }
+
+        function fermerModal() {
+            const modal = document.querySelector('.fixed.inset-0');
+            if (modal) {
+                modal.remove();
+            }
+        }
+
+        function supprimerItem(type, index) {
+            const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+            if (type === 'revenu') donnees.revenus.splice(index, 1);
+            if (type === 'depense') donnees.depenses.splice(index, 1);
+            if (type === 'facture') donnees.factures.splice(index, 1);
+            if (type === 'investissement') donnees.investissements.splice(index, 1);
+            if (type === 'epargne') donnees.epargnes.splice(index, 1);
+            mettreAJourAffichage();
+            sauvegarderDonnees(); // Auto-sauvegarde
+        }
+
+        function mettreAJourAffichage() {
+            const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+            
+            // Calcul des totaux
+            const totalRevenus = donnees.revenus.reduce((sum, item) => sum + item.montant, 0);
+            const totalDepenses = donnees.depenses.reduce((sum, item) => sum + item.montant, 0);
+            const totalFactures = donnees.factures.reduce((sum, item) => sum + item.montant, 0);
+            
+            // Pour les totaux d'affichage, on compte tout
+            const totalInvestissements = donnees.investissements.reduce((sum, item) => sum + item.montant, 0);
+            const totalEpargnes = donnees.epargnes.reduce((sum, item) => sum + item.montant, 0);
+            
+            // Pour le calcul du solde, on ne compte que les nouveaux investissements/épargnes (pas les reportés)
+            const investissementsNouveaux = donnees.investissements.filter(item => !item.reporte).reduce((sum, item) => sum + item.montant, 0);
+            const epargnesNouveaux = donnees.epargnes.filter(item => !item.reporte).reduce((sum, item) => sum + item.montant, 0);
+            
+            const solde = totalRevenus - totalDepenses - totalFactures - investissementsNouveaux - epargnesNouveaux;
+
+            // Mise à jour des cartes de résumé
+            document.getElementById('total-revenus').textContent = totalRevenus.toFixed(2) + ' €';
+            document.getElementById('total-depenses').textContent = totalDepenses.toFixed(2) + ' €';
+            document.getElementById('total-factures').textContent = totalFactures.toFixed(2) + ' €';
+            document.getElementById('total-investissements').textContent = totalInvestissements.toFixed(2) + ' €';
+            document.getElementById('total-epargnes').textContent = totalEpargnes.toFixed(2) + ' €';
+            document.getElementById('solde').textContent = solde.toFixed(2) + ' €';
+            
+            // Couleur du solde
+            const soldeElement = document.getElementById('solde');
+            if (solde >= 0) {
+                soldeElement.className = 'text-2xl font-bold text-success';
+            } else {
+                soldeElement.className = 'text-2xl font-bold text-danger';
+            }
+
+            // Mise à jour des listes
+            mettreAJourListe('liste-revenus', donnees.revenus, 'revenu', 'success');
+            mettreAJourListe('liste-depenses', donnees.depenses, 'depense', 'danger');
+            mettreAJourListeFactures('liste-factures', donnees.factures, 'facture', 'warning');
+            mettreAJourListeModifiable('liste-investissements', donnees.investissements, 'investissement', 'purple-600');
+            mettreAJourListeModifiable('liste-epargnes', donnees.epargnes, 'epargne', 'blue-600');
+
+            // Mise à jour du graphique (utilise les nouveaux montants pour le calcul)
+            mettreAJourGraphique(totalRevenus, totalDepenses, totalFactures, investissementsNouveaux, epargnesNouveaux);
+            
+            // Mise à jour de la légende
+            const budgetRestant = Math.max(0, solde);
+            document.getElementById('chart-restant').textContent = budgetRestant.toFixed(2) + ' €';
+            document.getElementById('chart-depenses').textContent = totalDepenses.toFixed(2) + ' €';
+            document.getElementById('chart-factures').textContent = totalFactures.toFixed(2) + ' €';
+            document.getElementById('chart-investissements').textContent = totalInvestissements.toFixed(2) + ' €';
+            document.getElementById('chart-epargnes').textContent = totalEpargnes.toFixed(2) + ' €';
+        }
+
+        function mettreAJourListe(containerId, items, type, colorClass) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            
+            items.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = `flex items-center justify-between p-3 bg-${colorClass}/5 rounded-xl border border-${colorClass}/20`;
+                div.innerHTML = `
+                    <div class="flex-1">
+                        <span class="font-medium text-slate-800">${item.nom}</span>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <span class="font-bold text-${colorClass}">${item.montant.toFixed(2)} €</span>
+                        <button onclick="supprimerItem('${type}', ${index})" 
+                                class="text-slate-400 hover:text-danger transition-colors">
+                            ✕
+                        </button>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function mettreAJourListeFactures(containerId, items, type, colorClass) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            
+            items.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = `flex items-center justify-between p-3 bg-${colorClass}/5 rounded-xl border border-${colorClass}/20`;
+                div.innerHTML = `
+                    <div class="flex-1">
+                        <span class="font-medium text-slate-800">${item.nom}</span>
+                        ${item.recurrente ? '<span class="ml-2 text-xs bg-warning/20 text-warning px-2 py-1 rounded-full">🔄 Récurrente</span>' : ''}
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <span class="font-bold text-${colorClass}">${item.montant.toFixed(2)} €</span>
+                        <button onclick="supprimerItem('${type}', ${index})" 
+                                class="text-slate-400 hover:text-danger transition-colors">
+                            ✕
+                        </button>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function mettreAJourListeModifiable(containerId, items, type, colorClass) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            
+            items.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = `flex items-center justify-between p-3 bg-${colorClass}/5 rounded-xl border border-${colorClass}/20`;
+                div.innerHTML = `
+                    <div class="flex-1">
+                        <span class="font-medium text-slate-800">${item.nom}</span>
+                        ${item.reporte ? '<span class="ml-2 text-xs bg-slate-200 text-slate-600 px-2 py-1 rounded-full">📋 Reporté</span>' : ''}
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <span class="font-bold text-${colorClass}">${item.montant.toFixed(2)} €</span>
+                        <button onclick="ajouterMontant('${type}', ${index})" 
+                                class="text-slate-400 hover:text-success transition-colors text-lg font-bold" 
+                                title="Ajouter un montant">
+                            +
+                        </button>
+                        <button onclick="retirerMontant('${type}', ${index})" 
+                                class="text-slate-400 hover:text-warning transition-colors text-lg font-bold" 
+                                title="Retirer un montant">
+                            -
+                        </button>
+                        <button onclick="supprimerItem('${type}', ${index})" 
+                                class="text-slate-400 hover:text-danger transition-colors">
+                            ✕
+                        </button>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function mettreAJourGraphique(revenus, depenses, factures, investissements, epargnes) {
+            const budgetRestant = Math.max(0, revenus - depenses - factures - investissements - epargnes);
+            const totalUtilise = depenses + factures + investissements + epargnes;
+            
+            // Effacer le canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (revenus === 0) {
+                // Afficher un cercle gris si pas de revenus
+                ctx.beginPath();
+                ctx.arc(150, 150, 100, 0, 2 * Math.PI);
+                ctx.fillStyle = '#e2e8f0';
+                ctx.fill();
+                ctx.fillStyle = '#64748b';
+                ctx.font = '16px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Aucun revenu', 150, 155);
+                return;
+            }
+
+            const colors = ['#10b981', '#ef4444', '#f59e0b', '#9333ea', '#2563eb']; // success, danger, warning, purple, blue
+            const values = [budgetRestant, depenses, factures, investissements, epargnes];
+            const total = revenus; // Le total est basé sur les revenus
+            
+            let currentAngle = -Math.PI / 2; // Commencer en haut
+            
+            values.forEach((value, index) => {
+                if (value > 0) {
+                    const sliceAngle = (value / total) * 2 * Math.PI;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(150, 150);
+                    ctx.arc(150, 150, 100, currentAngle, currentAngle + sliceAngle);
+                    ctx.closePath();
+                    ctx.fillStyle = colors[index];
+                    ctx.fill();
+                    
+                    // Bordure blanche
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                    
+                    currentAngle += sliceAngle;
+                }
+            });
+            
+            // Si les dépenses dépassent les revenus, afficher un indicateur
+            if (totalUtilise > revenus) {
+                ctx.fillStyle = '#ef4444';
+                ctx.font = 'bold 14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Budget dépassé !', 150, 270);
+            }
+        }
+
+        function initialiserSelecteursDate() {
+            const dateActuelle = new Date();
+            const moisActuelDate = dateActuelle.getMonth();
+            const anneeActuelle = dateActuelle.getFullYear();
+            
+            // Définir les valeurs par défaut (3 derniers mois)
+            if (!periodePersonnalisee) {
+                definirPeriode('3mois');
+            }
+        }
+
+        function definirPeriode(type) {
+            const dateActuelle = new Date();
+            const moisActuelDate = dateActuelle.getMonth();
+            const anneeActuelle = dateActuelle.getFullYear();
+            
+            let moisDebut, anneeDebut, moisFin, anneeFin, description;
+            
+            switch(type) {
+                case '3mois':
+                    // 3 derniers mois à partir du mois actuel dans l'app
+                    moisFin = moisActuel.mois;
+                    anneeFin = moisActuel.annee;
+                    moisDebut = moisActuel.mois - 2;
+                    anneeDebut = moisActuel.annee;
+                    if (moisDebut < 0) {
+                        moisDebut += 12;
+                        anneeDebut--;
+                    }
+                    description = "3 derniers mois";
+                    break;
+                    
+                case '6mois':
+                    moisFin = moisActuel.mois;
+                    anneeFin = moisActuel.annee;
+                    moisDebut = moisActuel.mois - 5;
+                    anneeDebut = moisActuel.annee;
+                    if (moisDebut < 0) {
+                        moisDebut += 12;
+                        anneeDebut--;
+                    }
+                    description = "6 derniers mois";
+                    break;
+                    
+                case 'annee':
+                    moisDebut = 0; // Janvier
+                    anneeDebut = moisActuel.annee;
+                    moisFin = 11; // Décembre
+                    anneeFin = moisActuel.annee;
+                    description = `Année ${moisActuel.annee}`;
+                    break;
+                    
+                case 'reset':
+                    definirPeriode('3mois');
+                    return;
+            }
+            
+            // Mettre à jour les sélecteurs
+            document.getElementById('mois-debut').value = moisDebut;
+            document.getElementById('annee-debut').value = anneeDebut;
+            document.getElementById('mois-fin').value = moisFin;
+            document.getElementById('annee-fin').value = anneeFin;
+            
+            // Sauvegarder la période
+            periodePersonnalisee = { moisDebut, anneeDebut, moisFin, anneeFin, description };
+            
+            // Mettre à jour l'affichage
+            document.getElementById('periode-actuelle').textContent = description;
+            
+            // Mettre à jour les résumés
+            mettreAJourResumePersonnalise();
+        }
+
+        function mettreAJourResumePersonnalise() {
+            const moisDebut = parseInt(document.getElementById('mois-debut').value);
+            const anneeDebut = parseInt(document.getElementById('annee-debut').value);
+            const moisFin = parseInt(document.getElementById('mois-fin').value);
+            const anneeFin = parseInt(document.getElementById('annee-fin').value);
+            
+            // Validation des dates
+            const dateDebut = new Date(anneeDebut, moisDebut);
+            const dateFin = new Date(anneeFin, moisFin);
+            
+            if (dateDebut > dateFin) {
+                alert('La date de début doit être antérieure à la date de fin !');
+                return;
+            }
+            
+            // Calculer les totaux pour la période sélectionnée
+            let totaux = { revenus: 0, depenses: 0, factures: 0, investissements: 0, epargnes: 0 };
+            
+            let moisCourant = moisDebut;
+            let anneeCourante = anneeDebut;
+            
+            while (anneeCourante < anneeFin || (anneeCourante === anneeFin && moisCourant <= moisFin)) {
+                const donnees = obtenirDonneesMois(moisCourant, anneeCourante);
+                totaux.revenus += donnees.revenus.reduce((sum, item) => sum + item.montant, 0);
+                totaux.depenses += donnees.depenses.reduce((sum, item) => sum + item.montant, 0);
+                totaux.factures += donnees.factures.reduce((sum, item) => sum + item.montant, 0);
+                totaux.investissements += donnees.investissements.reduce((sum, item) => sum + item.montant, 0);
+                totaux.epargnes += donnees.epargnes.reduce((sum, item) => sum + item.montant, 0);
+                
+                moisCourant++;
+                if (moisCourant > 11) {
+                    moisCourant = 0;
+                    anneeCourante++;
+                }
+            }
+            
+            // Mettre à jour le titre
+            const nbMois = calculerNombreMois(moisDebut, anneeDebut, moisFin, anneeFin);
+            let titre;
+            if (nbMois === 1) {
+                titre = `${nomsMois[moisDebut]} ${anneeDebut}`;
+            } else if (anneeDebut === anneeFin) {
+                titre = `${nomsMois[moisDebut]} - ${nomsMois[moisFin]} ${anneeDebut}`;
+            } else {
+                titre = `${nomsMois[moisDebut]} ${anneeDebut} - ${nomsMois[moisFin]} ${anneeFin}`;
+            }
+            document.getElementById('titre-resume-personnalise').textContent = titre;
+            
+            // Mettre à jour la période actuelle
+            document.getElementById('periode-actuelle').textContent = titre;
+            
+            // Dessiner le graphique
+            const canvasPersonnalise = document.getElementById('chartPersonnalise');
+            const ctxPersonnalise = canvasPersonnalise.getContext('2d');
+            dessinerGraphiqueResume(ctxPersonnalise, totaux);
+            
+            // Mettre à jour la légende
+            const legendePersonnalise = document.getElementById('legende-personnalise');
+            legendePersonnalise.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-success rounded-full mr-3"></div>
+                        <span class="text-slate-700">Revenus</span>
+                    </div>
+                    <span class="font-semibold text-success">${totaux.revenus.toFixed(2)} €</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-danger rounded-full mr-3"></div>
+                        <span class="text-slate-700">Dépenses</span>
+                    </div>
+                    <span class="font-semibold text-danger">${totaux.depenses.toFixed(2)} €</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-warning rounded-full mr-3"></div>
+                        <span class="text-slate-700">Factures</span>
+                    </div>
+                    <span class="font-semibold text-warning">${totaux.factures.toFixed(2)} €</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-purple-600 rounded-full mr-3"></div>
+                        <span class="text-slate-700">Investissements</span>
+                    </div>
+                    <span class="font-semibold text-purple-600">${totaux.investissements.toFixed(2)} €</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-blue-600 rounded-full mr-3"></div>
+                        <span class="text-slate-700">Épargne</span>
+                    </div>
+                    <span class="font-semibold text-blue-600">${totaux.epargnes.toFixed(2)} €</span>
+                </div>
+            `;
+        }
+
+        function calculerNombreMois(moisDebut, anneeDebut, moisFin, anneeFin) {
+            return (anneeFin - anneeDebut) * 12 + (moisFin - moisDebut) + 1;
+        }
+
+        function mettreAJourResumes() {
+            mettreAJourResumePersonnalise();
+            mettreAJourResumeAnnuel();
+        }
+
+        function mettreAJourResumeAnnuel() {
+            const canvasAnnuel = document.getElementById('chartAnnuel');
+            const ctxAnnuel = canvasAnnuel.getContext('2d');
+            
+            // Calculer l'année entière
+            let totaux = { revenus: 0, depenses: 0, factures: 0, investissements: 0, epargnes: 0 };
+            
+            for (let mois = 0; mois < 12; mois++) {
+                const donnees = obtenirDonneesMois(mois, moisActuel.annee);
+                totaux.revenus += donnees.revenus.reduce((sum, item) => sum + item.montant, 0);
+                totaux.depenses += donnees.depenses.reduce((sum, item) => sum + item.montant, 0);
+                totaux.factures += donnees.factures.reduce((sum, item) => sum + item.montant, 0);
+                totaux.investissements += donnees.investissements.reduce((sum, item) => sum + item.montant, 0);
+                totaux.epargnes += donnees.epargnes.reduce((sum, item) => sum + item.montant, 0);
+            }
+            
+            dessinerGraphiqueResume(ctxAnnuel, totaux);
+            
+            // Mettre à jour la légende
+            const legendeAnnuel = document.getElementById('legende-annuel');
+            legendeAnnuel.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-success rounded-full mr-3"></div>
+                        <span class="text-slate-700">Revenus</span>
+                    </div>
+                    <span class="font-semibold text-success">${totaux.revenus.toFixed(2)} €</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-danger rounded-full mr-3"></div>
+                        <span class="text-slate-700">Dépenses</span>
+                    </div>
+                    <span class="font-semibold text-danger">${totaux.depenses.toFixed(2)} €</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-warning rounded-full mr-3"></div>
+                        <span class="text-slate-700">Factures</span>
+                    </div>
+                    <span class="font-semibold text-warning">${totaux.factures.toFixed(2)} €</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-purple-600 rounded-full mr-3"></div>
+                        <span class="text-slate-700">Investissements</span>
+                    </div>
+                    <span class="font-semibold text-purple-600">${totaux.investissements.toFixed(2)} €</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-blue-600 rounded-full mr-3"></div>
+                        <span class="text-slate-700">Épargne</span>
+                    </div>
+                    <span class="font-semibold text-blue-600">${totaux.epargnes.toFixed(2)} €</span>
+                </div>
+            `;
+        }
+
+        function dessinerGraphiqueResume(ctx, totaux) {
+            ctx.clearRect(0, 0, 300, 300);
+            
+            const total = totaux.revenus + totaux.depenses + totaux.factures + totaux.investissements + totaux.epargnes;
+            
+            if (total === 0) {
+                ctx.beginPath();
+                ctx.arc(150, 150, 100, 0, 2 * Math.PI);
+                ctx.fillStyle = '#e2e8f0';
+                ctx.fill();
+                ctx.fillStyle = '#64748b';
+                ctx.font = '16px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Aucune donnée', 150, 155);
+                return;
+            }
+
+            const colors = ['#10b981', '#ef4444', '#f59e0b', '#9333ea', '#2563eb'];
+            const values = [totaux.revenus, totaux.depenses, totaux.factures, totaux.investissements, totaux.epargnes];
+            
+            let currentAngle = -Math.PI / 2;
+            
+            values.forEach((value, index) => {
+                if (value > 0) {
+                    const sliceAngle = (value / total) * 2 * Math.PI;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(150, 150);
+                    ctx.arc(150, 150, 100, currentAngle, currentAngle + sliceAngle);
+                    ctx.closePath();
+                    ctx.fillStyle = colors[index];
+                    ctx.fill();
+                    
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                    
+                    currentAngle += sliceAngle;
+                }
+            });
+        }
+
+        // Gestion des touches Enter
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                const activeElement = document.activeElement;
+                if (activeElement.id.includes('revenu')) ajouterRevenu();
+                if (activeElement.id.includes('depense')) ajouterDepense();
+                if (activeElement.id.includes('facture')) ajouterFacture();
+                if (activeElement.id.includes('investissement')) ajouterInvestissement();
+                if (activeElement.id.includes('epargne')) ajouterEpargne();
+            }
+        });
+
+        // Variables pour la gestion de connexion
+        let modeInscription = false;
+        let utilisateurConnecte = false;
+
+        // Fonctions de connexion
+        function basculerModeInscription() {
+            modeInscription = !modeInscription;
+            const texteBascule = document.getElementById('texte-bascule');
+            const boutonPrincipal = document.getElementById('btn-principal-connexion');
+            
+            if (modeInscription) {
+                texteBascule.textContent = 'Déjà un compte ? Se connecter';
+                boutonPrincipal.innerHTML = 'S\'inscrire';
+                boutonPrincipal.onclick = sInscrire;
+            } else {
+                texteBascule.textContent = 'Pas encore de compte ? S\'inscrire';
+                boutonPrincipal.innerHTML = 'Se connecter';
+                boutonPrincipal.onclick = seConnecter;
+            }
+        }
+
+        // Fonction connexion avec backend réel
+        async function seConnecter() {
+            const email = document.getElementById('email-connexion').value;
+            const password = document.getElementById('password-connexion').value;
+            
+            if (!email || !password) {
+                afficherMessage('Veuillez remplir tous les champs', 'error');
+                return;
+            }
+            
+            // Validation email
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                afficherMessage('Veuillez entrer un email valide', 'error');
+                return;
+            }
+            
+            afficherMessage('Connexion en cours...', 'info');
+            
+            try {
+                const response = await apiCall('/login', {
+                    method: 'POST',
+                    body: JSON.stringify({ email, password })
+                });
+                
+                // Stocker le token d'authentification
+                authToken = response.access_token;
+                localStorage.setItem('authToken', authToken);
+                
+                // Récupérer les informations utilisateur
+                const userInfo = await apiCall('/me');
+                currentUser = userInfo;
+                localStorage.setItem('userEmail', userInfo.email);
+                localStorage.setItem('userId', userInfo.id);
+                
+                utilisateurConnecte = true;
+                afficherMessage('✅ Connexion réussie ! Bienvenue !', 'success');
+                
+                // Mettre à jour l'interface
+                mettreAJourInterfaceConnexion(userInfo.email);
+                
+                // Charger les données utilisateur
+                await chargerDonneesUtilisateur();
+                
+                // Rediriger vers l'onglet budget après 1 seconde
+                setTimeout(() => {
+                    changerOnglet('budget');
+                }, 1000);
+                
+            } catch (error) {
+                console.error('Erreur de connexion:', error);
+                afficherMessage(`❌ Erreur de connexion: ${error.message}`, 'error');
+            }
+        }
+
+
+
+        // Fonction inscription avec backend réel
+        async function sInscrire() {
+            const email = document.getElementById('email-connexion').value;
+            const password = document.getElementById('password-connexion').value;
+            
+            if (!email || !password) {
+                afficherMessage('Veuillez remplir tous les champs', 'error');
+                return;
+            }
+            
+            if (password.length < 6) {
+                afficherMessage('Le mot de passe doit contenir au moins 6 caractères', 'error');
+                return;
+            }
+            
+            // Validation email
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                afficherMessage('Veuillez entrer un email valide', 'error');
+                return;
+            }
+            
+            afficherMessage('Création du compte en cours...', 'info');
+            
+            try {
+                // Créer le compte
+                const signupResponse = await apiCall('/signup', {
+                    method: 'POST',
+                    body: JSON.stringify({ email, password })
+                });
+                
+                afficherMessage('✅ Inscription réussie ! Connexion automatique...', 'success');
+                
+                // Connexion automatique après inscription
+                setTimeout(async () => {
+                    try {
+                        const loginResponse = await apiCall('/login', {
+                            method: 'POST',
+                            body: JSON.stringify({ email, password })
+                        });
+                        
+                        // Stocker le token d'authentification
+                        authToken = loginResponse.access_token;
+                        localStorage.setItem('authToken', authToken);
+                        
+                        // Récupérer les informations utilisateur
+                        const userInfo = await apiCall('/me');
+                        currentUser = userInfo;
+                        localStorage.setItem('userEmail', userInfo.email);
+                        localStorage.setItem('userId', userInfo.id);
+                        
+                        utilisateurConnecte = true;
+                        
+                        // Mettre à jour l'interface
+                        mettreAJourInterfaceConnexion(userInfo.email);
+                        
+                        // Rediriger vers l'onglet abonnement après inscription
+                        setTimeout(() => {
+                            changerOnglet('abonnement');
+                        }, 500);
+                        
+                    } catch (loginError) {
+                        console.error('Erreur de connexion automatique:', loginError);
+                        afficherMessage('Inscription réussie ! Veuillez vous connecter manuellement.', 'success');
+                        // Basculer vers le mode connexion
+                        if (modeInscription) {
+                            basculerModeInscription();
+                        }
+                        document.getElementById('password-connexion').value = '';
+                    }
+                }, 1000);
+                
+            } catch (error) {
+                console.error('Erreur d\'inscription:', error);
+                let errorMessage = error.message;
+                
+                // Gestion des erreurs spécifiques Supabase
+                if (errorMessage.includes('already registered')) {
+                    errorMessage = 'Cet email est déjà utilisé. Essayez de vous connecter.';
+                } else if (errorMessage.includes('password')) {
+                    errorMessage = 'Le mot de passe ne respecte pas les critères requis.';
+                } else if (errorMessage.includes('email')) {
+                    errorMessage = 'Format d\'email invalide.';
+                }
+                
+                afficherMessage(`❌ Erreur d'inscription: ${errorMessage}`, 'error');
+            }
+        }
+
+        function afficherMessage(message, type) {
+            const messageDiv = document.getElementById('message-connexion');
+            messageDiv.classList.remove('hidden');
+            messageDiv.textContent = message;
+            
+            // Réinitialiser les classes
+            messageDiv.className = 'mt-4 p-3 rounded-lg text-center';
+            
+            // Ajouter la classe selon le type
+            if (type === 'success') {
+                messageDiv.classList.add('bg-green-100', 'text-green-700', 'border', 'border-green-200');
+            } else if (type === 'error') {
+                messageDiv.classList.add('bg-red-100', 'text-red-700', 'border', 'border-red-200');
+            } else if (type === 'info') {
+                messageDiv.classList.add('bg-blue-100', 'text-blue-700', 'border', 'border-blue-200');
+            }
+        }
+
+        function mettreAJourInterfaceConnexion(email) {
+            // Mettre à jour le bouton de connexion pour afficher l'utilisateur connecté
+            const btnConnexion = document.getElementById('btn-connexion');
+            btnConnexion.innerHTML = `<span class="text-sm">✓</span>`;
+            btnConnexion.title = `Connecté en tant que ${email}`;
+            btnConnexion.classList.add('bg-green-500', 'hover:bg-green-600');
+            btnConnexion.classList.remove('bg-gradient-to-r', 'from-purple-600', 'to-pink-600', 'hover:from-purple-700', 'hover:to-pink-700');
+            
+            // Ajouter un gestionnaire de clic pour la déconnexion
+            btnConnexion.onclick = seDeconnecter;
+        }
+
+        // Vérifier l'état de la session au chargement (backend réel)
+        async function verifierSession() {
+            const storedToken = localStorage.getItem('authToken');
+            const userEmail = localStorage.getItem('userEmail');
+            
+            if (storedToken && userEmail) {
+                authToken = storedToken;
+                
+                try {
+                    // Vérifier si le token est toujours valide
+                    const userInfo = await apiCall('/me');
+                    currentUser = userInfo;
+                    utilisateurConnecte = true;
+                    mettreAJourInterfaceConnexion(userInfo.email);
+                    
+                    // Charger les données utilisateur
+                    await chargerDonneesUtilisateur();
+                    
+                    console.log('✅ Session restaurée pour:', userInfo.email);
+                    
+                } catch (error) {
+                    console.error('Token invalide ou expiré:', error);
+                    // Nettoyer les données locales si le token est invalide
+                    localStorage.removeItem('authToken');
+                    localStorage.removeItem('userEmail');
+                    localStorage.removeItem('userId');
+                    authToken = null;
+                    currentUser = null;
+                    utilisateurConnecte = false;
+                }
+            } else {
+                utilisateurConnecte = false;
+                console.log('Aucune session sauvegardée trouvée');
+            }
+        }
+
+        // Fonction déconnexion avec backend réel
+        async function seDeconnecter() {
+            try {
+                // Optionnel: appeler un endpoint de déconnexion côté serveur
+                // await apiCall('/logout', { method: 'POST' });
+            } catch (error) {
+                console.error('Erreur lors de la déconnexion côté serveur:', error);
+            }
+            
+            // Supprimer les données locales
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('userEmail');
+            localStorage.removeItem('userId');
+            authToken = null;
+            currentUser = null;
+            utilisateurConnecte = false;
+            
+            // Réinitialiser les données de l'application
+            donneesParMois = {};
+            
+            // Réinitialiser le bouton de connexion
+            const btnConnexion = document.getElementById('btn-connexion');
+            btnConnexion.innerHTML = `<span class="text-xl">👤</span>`;
+            btnConnexion.title = '';
+            btnConnexion.classList.remove('bg-green-500', 'hover:bg-green-600');
+            btnConnexion.classList.add('bg-gradient-to-r', 'from-purple-600', 'to-pink-600', 'hover:from-purple-700', 'hover:to-pink-700');
+            btnConnexion.onclick = () => changerOnglet('connexion');
+            
+            // Réinitialiser le formulaire
+            document.getElementById('email-connexion').value = '';
+            document.getElementById('password-connexion').value = '';
+            document.getElementById('message-connexion').classList.add('hidden');
+            
+            // Réinitialiser le mode
+            if (modeInscription) {
+                basculerModeInscription();
+            }
+            
+            // Mettre à jour l'affichage
+            mettreAJourAffichage();
+            
+            changerOnglet('connexion');
+        }
+
+        // Fonction pour choisir un abonnement
+        function choisirAbonnement(type) {
+            let prix, periode, description;
+            
+            if (type === 'mensuel') {
+                prix = '4,99 €';
+                periode = 'mois';
+                description = 'Abonnement mensuel avec 14 jours d\'essai gratuit';
+            } else if (type === 'annuel') {
+                prix = '49,99 €';
+                periode = 'an';
+                description = 'Abonnement annuel (économisez 17%)';
+            }
+            
+            // Créer une modal de confirmation
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+            modal.innerHTML = `
+                <div class="bg-white rounded-2xl p-8 max-w-md w-full mx-4">
+                    <div class="text-center mb-6">
+                        <div class="w-16 h-16 bg-gradient-to-r from-purple-100 to-pink-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <span class="text-2xl">💳</span>
+                        </div>
+                        <h3 class="text-2xl font-bold text-slate-800 mb-2">Confirmer votre abonnement</h3>
+                        <p class="text-slate-600">${description}</p>
+                    </div>
+                    
+                    <div class="bg-slate-50 rounded-xl p-4 mb-6">
+                        <div class="flex justify-between items-center">
+                            <span class="font-medium text-slate-700">Prix :</span>
+                            <span class="text-2xl font-bold text-purple-600">${prix}/${periode}</span>
+                        </div>
+                        ${type === 'mensuel' ? '<p class="text-sm text-green-600 mt-2">✓ 14 jours d\'essai gratuit inclus</p>' : ''}
+                    </div>
+                    
+                    <div class="space-y-3">
+                        <button onclick="confirmerAbonnement('${type}')" 
+                                class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-6 py-3 rounded-xl font-medium transition-all">
+                            Confirmer et payer
+                        </button>
+                        <button onclick="fermerModal()" 
+                                class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 px-6 py-3 rounded-xl font-medium transition-all">
+                            Annuler
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+        
+        async function confirmerAbonnement(type) {
+            if (!utilisateurConnecte) {
+                alert('Veuillez vous connecter avant de souscrire à un abonnement');
+                changerOnglet('connexion');
+                return;
+            }
+
+            const modal = document.querySelector('.fixed.inset-0');
+            if (modal) {
+                modal.innerHTML = `
+                    <div class="bg-white rounded-2xl p-8 max-w-md w-full mx-4">
+                        <div class="text-center">
+                            <div class="w-16 h-16 bg-gradient-to-r from-green-100 to-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <span class="text-2xl">⏳</span>
+                            </div>
+                            <h3 class="text-xl font-bold text-slate-800 mb-2">Préparation du paiement...</h3>
+                            <p class="text-slate-600">Connexion à Stripe...</p>
+                            <div class="mt-4">
+                                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                try {
+                    // Appeler l'endpoint de création de paiement
+                    const paymentResponse = await apiCall('/create-payment', {
+                        method: 'POST'
+                    });
+                    
+                    // Simuler le processus de paiement Stripe
+                    modal.innerHTML = `
+                        <div class="bg-white rounded-2xl p-8 max-w-md w-full mx-4">
+                            <div class="text-center">
+                                <div class="w-16 h-16 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <span class="text-2xl">💳</span>
+                                </div>
+                                <h3 class="text-xl font-bold text-slate-800 mb-2">Paiement Stripe</h3>
+                                <p class="text-slate-600 mb-4">Simulation du paiement sécurisé</p>
+                                <div class="bg-slate-50 rounded-xl p-4 mb-4">
+                                    <p class="text-sm text-slate-600">Client Secret: ${paymentResponse.client_secret.substring(0, 20)}...</p>
+                                </div>
+                                <button onclick="simulerPaiementReussi('${type}')" 
+                                        class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6 py-3 rounded-xl font-medium transition-all mb-3">
+                                    ✅ Simuler paiement réussi
+                                </button>
+                                <button onclick="fermerModal()" 
+                                        class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 px-6 py-3 rounded-xl font-medium transition-all">
+                                    Annuler
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    
+                } catch (error) {
+                    console.error('Erreur lors de la création du paiement:', error);
+                    modal.innerHTML = `
+                        <div class="bg-white rounded-2xl p-8 max-w-md w-full mx-4">
+                            <div class="text-center">
+                                <div class="w-16 h-16 bg-gradient-to-r from-red-100 to-pink-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <span class="text-2xl">❌</span>
+                                </div>
+                                <h3 class="text-xl font-bold text-red-600 mb-2">Erreur de paiement</h3>
+                                <p class="text-slate-600 mb-6">Impossible de préparer le paiement. Veuillez réessayer.</p>
+                                <button onclick="fermerModal()" 
+                                        class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 px-6 py-3 rounded-xl font-medium transition-all">
+                                    Fermer
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+        }
+        
+        function simulerPaiementReussi(type) {
+            const modal = document.querySelector('.fixed.inset-0');
+            if (modal) {
+                // Sauvegarder l'abonnement localement
+                localStorage.setItem('abonnement', type);
+                localStorage.setItem('dateAbonnement', new Date().toISOString());
+                
+                modal.innerHTML = `
+                    <div class="bg-white rounded-2xl p-8 max-w-md w-full mx-4">
+                        <div class="text-center">
+                            <div class="w-16 h-16 bg-gradient-to-r from-green-100 to-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <span class="text-2xl">✅</span>
+                            </div>
+                            <h3 class="text-2xl font-bold text-green-600 mb-2">Paiement réussi !</h3>
+                            <p class="text-slate-600 mb-6">Votre abonnement ${type} est maintenant actif. Profitez de toutes les fonctionnalités premium !</p>
+                            <button onclick="fermerModalEtRediriger()" 
+                                    class="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white px-6 py-3 rounded-xl font-medium transition-all">
+                                Commencer à utiliser Maîtriz
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        function fermerModalEtRediriger() {
+            fermerModal();
+            changerOnglet('budget');
+        }
+
+
+
+        // Fonction pour ouvrir les modals mobiles
+        function ouvrirModalMobile(type) {
+            // Ne pas ouvrir de modal sur desktop
+            if (window.innerWidth >= 768) return;
+            
+            const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+            let titre, couleur, icone, items, inputsHtml, ajouterFunction;
+            
+            switch(type) {
+                case 'revenus':
+                    titre = 'Revenus';
+                    couleur = 'success';
+                    icone = '📈';
+                    items = donnees.revenus;
+                    inputsHtml = `
+                        <input type="text" id="modal-revenu-nom" placeholder="Source de revenu" 
+                               class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-success focus:border-transparent outline-none mb-3">
+                        <input type="number" id="modal-revenu-montant" placeholder="Montant (€)" 
+                               class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-success focus:border-transparent outline-none mb-4">
+                    `;
+                    ajouterFunction = 'ajouterRevenuModal()';
+                    break;
+                case 'depenses':
+                    titre = 'Dépenses';
+                    couleur = 'danger';
+                    icone = '💸';
+                    items = donnees.depenses;
+                    inputsHtml = `
+                        <input type="text" id="modal-depense-nom" placeholder="Description" 
+                               class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-danger focus:border-transparent outline-none mb-3">
+                        <input type="number" id="modal-depense-montant" placeholder="Montant (€)" 
+                               class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-danger focus:border-transparent outline-none mb-4">
+                    `;
+                    ajouterFunction = 'ajouterDepenseModal()';
+                    break;
+                case 'factures':
+                    titre = 'Factures & Abonnements';
+                    couleur = 'warning';
+                    icone = '📋';
+                    items = donnees.factures;
+                    inputsHtml = `
+                        <input type="text" id="modal-facture-nom" placeholder="Nom de la facture" 
+                               class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-warning focus:border-transparent outline-none mb-3">
+                        <input type="number" id="modal-facture-montant" placeholder="Montant (€)" 
+                               class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-warning focus:border-transparent outline-none mb-3">
+                        <div class="flex items-center px-4 py-3 border border-slate-300 rounded-xl mb-4">
+                            <input type="checkbox" id="modal-facture-recurrente" class="mr-2 w-4 h-4 text-warning">
+                            <label for="modal-facture-recurrente" class="text-sm text-slate-700">Récurrente</label>
+                        </div>
+                    `;
+                    ajouterFunction = 'ajouterFactureModal()';
+                    break;
+                case 'investissements':
+                    titre = 'Investissements';
+                    couleur = 'purple-600';
+                    icone = '💰';
+                    items = donnees.investissements;
+                    inputsHtml = `
+                        <input type="text" id="modal-investissement-nom" placeholder="Type d'investissement" 
+                               class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none mb-3">
+                        <input type="number" id="modal-investissement-montant" placeholder="Montant (€)" 
+                               class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none mb-4">
+                    `;
+                    ajouterFunction = 'ajouterInvestissementModal()';
+                    break;
+                case 'epargnes':
+                    titre = 'Épargne';
+                    couleur = 'blue-600';
+                    icone = '🏦';
+                    items = donnees.epargnes;
+                    inputsHtml = `
+                        <input type="text" id="modal-epargne-nom" placeholder="Type d'épargne" 
+                               class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none mb-3">
+                        <input type="number" id="modal-epargne-montant" placeholder="Montant (€)" 
+                               class="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none mb-4">
+                    `;
+                    ajouterFunction = 'ajouterEpargneModal()';
+                    break;
+            }
+            
+            // Générer la liste des items
+            let listeHtml = '';
+            items.forEach((item, index) => {
+                const isModifiable = type === 'investissements' || type === 'epargnes';
+                const boutonsMod = isModifiable ? `
+                    <button onclick="ajouterMontantModal('${type}', ${index})" 
+                            class="text-slate-400 hover:text-success transition-colors text-lg font-bold mr-2" 
+                            title="Ajouter">+</button>
+                    <button onclick="retirerMontantModal('${type}', ${index})" 
+                            class="text-slate-400 hover:text-warning transition-colors text-lg font-bold mr-2" 
+                            title="Retirer">-</button>
+                ` : '';
+                
+                const badgeRecurrente = (type === 'factures' && item.recurrente) ? 
+                    '<span class="ml-2 text-xs bg-warning/20 text-warning px-2 py-1 rounded-full">🔄</span>' : '';
+                const badgeReporte = (isModifiable && item.reporte) ? 
+                    '<span class="ml-2 text-xs bg-slate-200 text-slate-600 px-2 py-1 rounded-full">📋</span>' : '';
+                
+                listeHtml += `
+                    <div class="flex items-center justify-between p-3 bg-${couleur}/5 rounded-xl border border-${couleur}/20 mb-2">
+                        <div class="flex-1 min-w-0">
+                            <span class="font-medium text-slate-800 block truncate">${item.nom}</span>
+                            ${badgeRecurrente}${badgeReporte}
+                        </div>
+                        <div class="flex items-center space-x-2 flex-shrink-0">
+                            <span class="font-bold text-${couleur} text-sm">${item.montant.toFixed(2)} €</span>
+                            ${boutonsMod}
+                            <button onclick="supprimerItemModal('${type}', ${index})" 
+                                    class="text-slate-400 hover:text-danger transition-colors">✕</button>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-end justify-center z-50';
+            modal.innerHTML = `
+                <div class="bg-white rounded-t-3xl w-full max-h-[90vh] overflow-y-auto">
+                    <div class="sticky top-0 bg-white border-b border-slate-200 p-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center">
+                                <span class="text-2xl mr-3">${icone}</span>
+                                <h3 class="text-xl font-bold text-slate-800">${titre}</h3>
+                            </div>
+                            <button onclick="fermerModal()" class="text-slate-400 hover:text-slate-600 text-2xl">×</button>
+                        </div>
+                    </div>
+                    
+                    <div class="p-4">
+                        <!-- Formulaire d'ajout -->
+                        <div class="mb-6">
+                            <h4 class="font-semibold text-slate-700 mb-3">Ajouter</h4>
+                            ${inputsHtml}
+                            <button onclick="${ajouterFunction}" 
+                                    class="w-full bg-${couleur} hover:bg-${couleur}/90 text-white px-6 py-3 rounded-xl font-medium transition-all">
+                                Ajouter
+                            </button>
+                        </div>
+                        
+                        <!-- Liste des items -->
+                        <div class="mb-6">
+                            <h4 class="font-semibold text-slate-700 mb-3">Liste (${items.length})</h4>
+                            <div id="modal-liste-${type}">
+                                ${listeHtml || '<p class="text-slate-500 text-center py-4">Aucun élément</p>'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+        
+        // Fonctions d'ajout pour les modals
+        function ajouterRevenuModal() {
+            const nom = document.getElementById('modal-revenu-nom').value;
+            const montant = parseFloat(document.getElementById('modal-revenu-montant').value);
+            
+            if (nom && montant > 0) {
+                const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+                donnees.revenus.push({ nom, montant });
+                document.getElementById('modal-revenu-nom').value = '';
+                document.getElementById('modal-revenu-montant').value = '';
+                mettreAJourAffichage();
+                sauvegarderDonnees();
+                rafraichirModalListe('revenus');
+            }
+        }
+        
+        function ajouterDepenseModal() {
+            const nom = document.getElementById('modal-depense-nom').value;
+            const montant = parseFloat(document.getElementById('modal-depense-montant').value);
+            
+            if (nom && montant > 0) {
+                const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+                donnees.depenses.push({ nom, montant });
+                document.getElementById('modal-depense-nom').value = '';
+                document.getElementById('modal-depense-montant').value = '';
+                mettreAJourAffichage();
+                sauvegarderDonnees();
+                rafraichirModalListe('depenses');
+            }
+        }
+        
+        function ajouterFactureModal() {
+            const nom = document.getElementById('modal-facture-nom').value;
+            const montant = parseFloat(document.getElementById('modal-facture-montant').value);
+            const recurrente = document.getElementById('modal-facture-recurrente').checked;
+            
+            if (nom && montant > 0) {
+                const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+                donnees.factures.push({ nom, montant, recurrente });
+                document.getElementById('modal-facture-nom').value = '';
+                document.getElementById('modal-facture-montant').value = '';
+                document.getElementById('modal-facture-recurrente').checked = false;
+                mettreAJourAffichage();
+                sauvegarderDonnees();
+                rafraichirModalListe('factures');
+            }
+        }
+        
+        function ajouterInvestissementModal() {
+            const nom = document.getElementById('modal-investissement-nom').value;
+            const montant = parseFloat(document.getElementById('modal-investissement-montant').value);
+            
+            if (nom && montant > 0) {
+                const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+                donnees.investissements.push({ nom, montant });
+                document.getElementById('modal-investissement-nom').value = '';
+                document.getElementById('modal-investissement-montant').value = '';
+                mettreAJourAffichage();
+                sauvegarderDonnees();
+                rafraichirModalListe('investissements');
+            }
+        }
+        
+        function ajouterEpargneModal() {
+            const nom = document.getElementById('modal-epargne-nom').value;
+            const montant = parseFloat(document.getElementById('modal-epargne-montant').value);
+            
+            if (nom && montant > 0) {
+                const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+                donnees.epargnes.push({ nom, montant });
+                document.getElementById('modal-epargne-nom').value = '';
+                document.getElementById('modal-epargne-montant').value = '';
+                mettreAJourAffichage();
+                sauvegarderDonnees();
+                rafraichirModalListe('epargnes');
+            }
+        }
+        
+        // Fonctions pour modifier les montants dans les modals
+        function ajouterMontantModal(type, index) {
+            const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+            let item;
+            
+            if (type === 'investissements') {
+                item = donnees.investissements[index];
+            } else if (type === 'epargnes') {
+                item = donnees.epargnes[index];
+            }
+            
+            if (!item) return;
+            
+            const montantAjouter = prompt(`Ajouter à "${item.nom}" (actuel: ${item.montant.toFixed(2)} €):`);
+            const montant = parseFloat(montantAjouter);
+            
+            if (!isNaN(montant) && montant > 0) {
+                const totalRevenus = donnees.revenus.reduce((sum, item) => sum + item.montant, 0);
+                const totalDepenses = donnees.depenses.reduce((sum, item) => sum + item.montant, 0);
+                const totalFactures = donnees.factures.reduce((sum, item) => sum + item.montant, 0);
+                const investissementsNouveaux = donnees.investissements.filter(item => !item.reporte).reduce((sum, item) => sum + item.montant, 0);
+                const epargnesNouveaux = donnees.epargnes.filter(item => !item.reporte).reduce((sum, item) => sum + item.montant, 0);
+                const revenus_disponibles = totalRevenus - totalDepenses - totalFactures - investissementsNouveaux - epargnesNouveaux;
+                
+                if (revenus_disponibles >= montant) {
+                    item.montant += montant;
+                    if (item.reporte) item.reporte = false;
+                    mettreAJourAffichage();
+                    sauvegarderDonnees();
+                    rafraichirModalListe(type);
+                } else {
+                    alert(`Revenus disponibles insuffisants ! Vous avez ${revenus_disponibles.toFixed(2)} € disponibles.`);
+                }
+            }
+        }
+        
+        function retirerMontantModal(type, index) {
+            const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+            let item, liste;
+            
+            if (type === 'investissements') {
+                item = donnees.investissements[index];
+                liste = donnees.investissements;
+            } else if (type === 'epargnes') {
+                item = donnees.epargnes[index];
+                liste = donnees.epargnes;
+            }
+            
+            if (!item) return;
+            
+            const montantRetirer = prompt(`Retirer de "${item.nom}" (actuel: ${item.montant.toFixed(2)} €):`);
+            const montant = parseFloat(montantRetirer);
+            
+            if (!isNaN(montant) && montant > 0) {
+                if (montant <= item.montant) {
+                    item.montant -= montant;
+                    if (item.montant === 0) {
+                        liste.splice(index, 1);
+                    }
+                    mettreAJourAffichage();
+                    sauvegarderDonnees();
+                    rafraichirModalListe(type);
+                } else {
+                    alert(`Vous ne pouvez pas retirer plus que le montant actuel (${item.montant.toFixed(2)} €) !`);
+                }
+            }
+        }
+        
+        function supprimerItemModal(type, index) {
+            if (confirm('Êtes-vous sûr de vouloir supprimer cet élément ?')) {
+                const donnees = obtenirDonneesMois(moisActuel.mois, moisActuel.annee);
+                if (type === 'revenus') donnees.revenus.splice(index, 1);
+                if (type === 'depenses') donnees.depenses.splice(index, 1);
+                if (type === 'factures') donnees.factures.splice(index, 1);
+                if (type === 'investissements') donnees.investissements.splice(index, 1);
+                if (type === 'epargnes') donnees.epargnes.splice(index, 1);
+                mettreAJourAffichage();
+                sauvegarderDonnees();
+                rafraichirModalListe(type);
+            }
+        }
+        
+        function rafraichirModalListe(type) {
+            const modal = document.querySelector('.fixed.inset-0');
+            if (modal) {
+                modal.remove();
+                ouvrirModalMobile(type);
+            }
+        }
+
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', async () => {
+            console.log('🚀 Initialisation de Maîtriz...');
+            
+            // Tester la connexion au serveur
+            const serveurDisponible = await testerConnexionServeur();
+            if (!serveurDisponible) {
+                console.warn('⚠️ Serveur non disponible, mode hors ligne activé');
+                // Vous pouvez ajouter une notification à l'utilisateur ici
+            } else {
+                console.log('✅ Serveur disponible');
+            }
+            
+            await verifierSession();
+            mettreAJourAffichageMois();
+            mettreAJourAffichage();
+        });
+    </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'96c64e51a53ee23a',t:'MTc1NDczMjU3Mi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Maîtriz - Gestion de Budget</title>
